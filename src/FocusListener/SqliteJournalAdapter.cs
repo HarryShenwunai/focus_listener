@@ -14,6 +14,9 @@ internal sealed class SqliteSessionJournalAdapter : ISessionJournal
         ("quality_score", "REAL NULL"),
         ("priority_score", "REAL NULL"),
         ("trigger_kind", "TEXT NULL"),
+        ("question_stem", "TEXT NULL"),
+        ("evidence_excerpt", "TEXT NULL"),
+        ("audio_source", "TEXT NULL"),
         ("answer_correct", "INTEGER NULL"),
         ("answer_ms", "INTEGER NULL"),
         ("generation_failure_reason", "TEXT NULL")
@@ -72,6 +75,9 @@ internal sealed class SqliteSessionJournalAdapter : ISessionJournal
                     quality_score REAL NULL,
                     priority_score REAL NULL,
                     trigger_kind TEXT NULL,
+                    question_stem TEXT NULL,
+                    evidence_excerpt TEXT NULL,
+                    audio_source TEXT NULL,
                     answer_correct INTEGER NULL,
                     answer_ms INTEGER NULL,
                     generation_failure_reason TEXT NULL
@@ -113,10 +119,12 @@ internal sealed class SqliteSessionJournalAdapter : ISessionJournal
                 INSERT INTO session_events(
                     session_id, occurred_at, event_type, payload_json,
                     subject, knowledge_type, quality_score, priority_score, trigger_kind,
+                    question_stem, evidence_excerpt, audio_source,
                     answer_correct, answer_ms, generation_failure_reason)
                 VALUES (
                     $session, $at, $type, $payload,
                     $subject, $knowledge, $quality, $priority, $trigger,
+                    $stem, $evidence, $audioSource,
                     $correct, $answerMs, $failure);
                 """;
             command.Parameters.AddWithValue("$session", sessionEvent.SessionId.ToString());
@@ -128,6 +136,9 @@ internal sealed class SqliteSessionJournalAdapter : ISessionJournal
             command.Parameters.AddWithValue("$quality", Db(analytics.QualityScore));
             command.Parameters.AddWithValue("$priority", Db(analytics.PriorityScore));
             command.Parameters.AddWithValue("$trigger", Db(analytics.Trigger));
+            command.Parameters.AddWithValue("$stem", Db(analytics.QuestionStem));
+            command.Parameters.AddWithValue("$evidence", Db(analytics.EvidenceExcerpt));
+            command.Parameters.AddWithValue("$audioSource", Db(analytics.AudioSource));
             command.Parameters.AddWithValue("$correct", Db(analytics.AnswerCorrect is null ? null : analytics.AnswerCorrect.Value ? 1 : 0));
             command.Parameters.AddWithValue("$answerMs", Db(analytics.AnswerMilliseconds));
             command.Parameters.AddWithValue("$failure", Db(analytics.GenerationFailureReason));
@@ -206,6 +217,9 @@ internal sealed class SqliteSessionJournalAdapter : ISessionJournal
         double? QualityScore,
         double? PriorityScore,
         string? Trigger,
+        string? QuestionStem,
+        string? EvidenceExcerpt,
+        string? AudioSource,
         bool? AnswerCorrect,
         long? AnswerMilliseconds,
         string? GenerationFailureReason)
@@ -220,6 +234,9 @@ internal sealed class SqliteSessionJournalAdapter : ISessionJournal
                 Number(root, "QualityScore"),
                 Number(root, "PriorityScore"),
                 Text(root, "Trigger"),
+                Text(root, "QuestionStem"),
+                Text(root, "EvidenceExcerpt"),
+                Text(root, "AudioSource"),
                 Boolean(root, "IsCorrect"),
                 Integer(root, "ElapsedMilliseconds"),
                 Text(root, "GenerationFailureReason") ?? FailureFromCode(root));
@@ -261,6 +278,7 @@ public static class SessionCsvExporter
     [
         "session_id", "event_id", "occurred_at", "event_type", "payload_json",
         "subject", "knowledge_type", "quality_score", "priority_score", "trigger_kind",
+        "question_stem", "evidence_excerpt", "audio_source",
         "answer_correct", "answer_ms", "generation_failure_reason"
     ];
 

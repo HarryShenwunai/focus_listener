@@ -24,7 +24,7 @@ internal sealed class GeminiQuestionCandidateAdapter : IQuestionCandidateSource,
         SessionStart start,
         [EnumeratorCancellation] CancellationToken cancellation)
     {
-        var audio = new WindowsClassroomAudioAdapter();
+        var audio = new WindowsClassroomAudioAdapter(AudioCaptureConfiguration.Default);
         var transcriber = new GeminiLiveTranscriptionAdapter(_options, _clock);
         using var generator = new GeminiRestatementQuestionGenerator(_options);
         var input = Channel.CreateUnbounded<TranscriptUnit>(new UnboundedChannelOptions

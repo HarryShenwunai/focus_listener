@@ -32,6 +32,26 @@ public sealed class TranscriptAwareFocusDiagnosticsTests
     }
 
     [Fact]
+    public async Task RunAsync_keeps_a_question_already_grounded_in_the_live_transcript_without_generating_twice()
+    {
+        const string transcript = "细胞膜能控制物质进出细胞。";
+        var grounded = new DiagnosticQuestionPreview(
+            "细胞膜有什么作用？",
+            ["A 控制物质进出", "B 制造阳光", "C 储存声音"],
+            "细胞膜能控制物质进出细胞");
+        var generator = new RecordingQuestionGenerator(null);
+        IFocusDiagnostics diagnostics = new TranscriptAwareFocusDiagnostics(
+            new StubDiagnostics(BuildView(transcript, grounded)),
+            generator);
+
+        var result = await diagnostics.RunAsync(
+            new InlineTestProgress<FocusDiagnosticsView>(_ => { }));
+
+        Assert.Null(generator.Input);
+        Assert.Equal(grounded, result.FinalView.Question);
+    }
+
+    [Fact]
     public async Task RunAsync_does_not_show_an_unrelated_question_when_transcription_is_empty()
     {
         var baseView = BuildView(string.Empty, new DiagnosticQuestionPreview(

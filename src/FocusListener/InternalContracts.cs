@@ -10,6 +10,7 @@ internal sealed record ResetQuestionCandidate(
 {
     public string Subject { get; init; } = "其他";
     public string Language { get; init; } = "und";
+    public string AudioSource { get; init; } = "未知";
     public string KnowledgeFingerprint { get; init; } = EligibleUnitId;
     public double QualityScore { get; init; } = 0.5;
 }

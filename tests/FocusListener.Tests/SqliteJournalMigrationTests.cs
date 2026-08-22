@@ -26,7 +26,10 @@ public sealed class SqliteJournalMigrationTests
                 KnowledgeType = "Causality",
                 QualityScore = 0.9,
                 PriorityScore = 0.8,
-                Trigger = "Automatic"
+                Trigger = "Automatic",
+                QuestionStem = "课堂中这条关系是什么？",
+                EvidenceExcerpt = "课堂证据原句",
+                AudioSource = "系统声音"
             }), CancellationToken.None);
 
             await using var connection = new SqliteConnection($"Data Source={database}");
@@ -43,8 +46,22 @@ public sealed class SqliteJournalMigrationTests
             }
 
             Assert.Contains("subject", names);
+            Assert.Contains("question_stem", names);
+            Assert.Contains("evidence_excerpt", names);
+            Assert.Contains("audio_source", names);
             Assert.Contains("answer_ms", names);
             Assert.Contains("generation_failure_reason", names);
+            await using var analytics = connection.CreateCommand();
+            analytics.CommandText = """
+                SELECT question_stem, evidence_excerpt, audio_source
+                FROM session_events
+                WHERE event_type = 'QuestionShown';
+                """;
+            await using var analyticsReader = await analytics.ExecuteReaderAsync();
+            Assert.True(await analyticsReader.ReadAsync());
+            Assert.Equal("课堂中这条关系是什么？", analyticsReader.GetString(0));
+            Assert.Equal("课堂证据原句", analyticsReader.GetString(1));
+            Assert.Equal("系统声音", analyticsReader.GetString(2));
             await using var count = connection.CreateCommand();
             count.CommandText = "SELECT COUNT(*) FROM session_events;";
             Assert.Equal(2L, Convert.ToInt64(await count.ExecuteScalarAsync()));

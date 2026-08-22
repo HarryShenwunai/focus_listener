@@ -127,7 +127,8 @@ internal sealed partial class KnowledgeQuestionPolicy(IChoiceShuffler? shuffler 
             Subject = subject,
             KnowledgeFingerprint = fingerprint,
             QualityScore = Math.Clamp(draft.QualityScore, 0, 1),
-            Language = question.Language
+            Language = question.Language,
+            AudioSource = unit.AudioSource
         };
         return KnowledgeQuestionEvaluation.Accept(candidate);
     }

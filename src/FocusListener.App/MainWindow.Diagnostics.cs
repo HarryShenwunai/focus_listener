@@ -39,11 +39,12 @@ public partial class MainWindow
             return;
         }
 
+        _settingsStoreV2 ??= new FocusInteractionSettingsStore(SettingsPathV2);
         var outputDirectory = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "FocusListener",
             "diagnostics");
-        _diagnosticsWindow = new SystemDiagnosticsWindow(_apiKey, outputDirectory)
+        _diagnosticsWindow = new SystemDiagnosticsWindow(_apiKey, outputDirectory, _settingsStoreV2)
         {
             Owner = this,
             Topmost = true

@@ -4,14 +4,11 @@ public static class TranscriptAwareFocusDiagnosticsFactory
 {
     public static IFocusDiagnostics Create(
         GeminiFocusOptions? gemini,
-        string outputDirectory)
+        string outputDirectory,
+        AudioCaptureConfiguration? audio = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(outputDirectory);
-        var inner = FocusDiagnosticsFactory.Create(gemini, outputDirectory);
-        IDiagnosticQuestionGenerator? generator = gemini is null
-            ? null
-            : new GeminiDiagnosticQuestionGenerator(gemini);
-        return new TranscriptAwareFocusDiagnostics(inner, generator);
+        return FocusDiagnosticsFactory.Create(gemini, outputDirectory, audio);
     }
 }
 
@@ -90,6 +87,12 @@ internal sealed class TranscriptAwareFocusDiagnostics(
             views.Report(HideFixedProbeQuestion(view)));
         var innerResult = await inner.RunAsync(bridge, cancellation);
         var source = innerResult.FinalView;
+
+        if (QuestionUsesLiveTranscript(source))
+        {
+            views.Report(source);
+            return innerResult;
+        }
 
         if (!CanGenerate(source))
         {
@@ -240,6 +243,19 @@ internal sealed class TranscriptAwareFocusDiagnostics(
             Items = items,
             Question = question
         };
+    }
+
+    private static bool QuestionUsesLiveTranscript(FocusDiagnosticsView view)
+    {
+        if (view.Question is not { Evidence.Length: > 0 } question ||
+            string.IsNullOrWhiteSpace(view.TranscriptPreview))
+        {
+            return false;
+        }
+
+        var transcript = KnowledgeQuestionPolicy.NormalizeForComparison(view.TranscriptPreview);
+        var evidence = KnowledgeQuestionPolicy.NormalizeForComparison(question.Evidence);
+        return evidence.Length > 0 && transcript.Contains(evidence, StringComparison.Ordinal);
     }
 
     private static FocusDiagnosticsSummary BuildSummary(

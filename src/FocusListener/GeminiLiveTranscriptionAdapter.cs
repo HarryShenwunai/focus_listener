@@ -8,7 +8,10 @@ namespace FocusListener;
 internal sealed record TranscriptUnit(
     string Text,
     DateTimeOffset RecognizedAt,
-    TimeSpan RelativeStart);
+    TimeSpan RelativeStart)
+{
+    public string AudioSource { get; init; } = "未知";
+}
 
 internal interface IClassroomTranscriber
 {
@@ -19,12 +22,14 @@ internal interface IClassroomTranscriber
 
 internal sealed class GeminiLiveTranscriptionAdapter(
     GeminiFocusOptions options,
-    ISessionClock clock) : IClassroomTranscriber
+    ISessionClock clock,
+    ClassroomExperienceControl? experience = null) : IClassroomTranscriber
 {
     public async IAsyncEnumerable<TranscriptUnit> TranscribeAsync(
         IAsyncEnumerable<PcmAudioFrame> audio,
         [EnumeratorCancellation] CancellationToken cancellation)
     {
+        Report(LiveTranscriptState.Connecting, "正在连接 Gemini Live…", string.Empty, string.Empty);
         using var client = new Client(apiKey: options.ApiKey);
         var config = new LiveConnectConfig
         {
@@ -43,10 +48,12 @@ internal sealed class GeminiLiveTranscriptionAdapter(
         };
 
         await using var session = await client.Live.ConnectAsync(options.LiveModel, config, cancellation);
+        Report(LiveTranscriptState.Listening, "正在听课，等待声音…", string.Empty, string.Empty);
         using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
         var startedAt = clock.UtcNow;
         var sendTask = SendAudioAsync(session, audio, lifetime.Token);
         var accumulator = new TranscriptAccumulator();
+        var collector = new LiveTranscriptionCollector();
 
         try
         {
@@ -55,37 +62,77 @@ internal sealed class GeminiLiveTranscriptionAdapter(
                 var message = await session.ReceiveAsync(cancellation);
                 if (message is null)
                 {
-                    break;
+                    throw new IOException("Gemini Live 在课堂仍进行时关闭了转写连接。");
                 }
 
                 var content = message.ServerContent;
-                var transcription = content?.InputTranscription;
-                if (!string.IsNullOrWhiteSpace(transcription?.Text))
+                var interim = content?.InterimInputTranscription;
+                var final = content?.InputTranscription;
+                if (!string.IsNullOrWhiteSpace(final?.Text))
                 {
-                    accumulator.Push(transcription.Text);
+                    accumulator.Push(final.Text);
                 }
 
-                var boundary = transcription?.Finished == true || content?.TurnComplete == true || accumulator.HasNaturalBoundary;
+                var changed = collector.Apply(new LiveTranscriptionEvent(
+                    interim?.Text,
+                    final?.Text,
+                    final?.Finished == true,
+                    content?.TurnComplete == true));
+                if (changed)
+                {
+                    Report(
+                        LiveTranscriptState.Listening,
+                        final is not null ? "已确认课堂文字" : "正在形成字幕…",
+                        collector.CommittedText,
+                        collector.InterimText);
+                }
+
+                var boundary = final?.Finished == true ||
+                               content?.TurnComplete == true ||
+                               accumulator.HasNaturalBoundary;
                 if (boundary && accumulator.TryTake(out var text))
                 {
                     var recognizedAt = clock.UtcNow;
-                    yield return new TranscriptUnit(text, recognizedAt, recognizedAt - startedAt);
+                    yield return new TranscriptUnit(text, recognizedAt, recognizedAt - startedAt)
+                    {
+                        AudioSource = experience?.LastAudioActivity?.Source ?? "未知"
+                    };
                 }
             }
 
             if (accumulator.TryTake(out var remainder))
             {
                 var recognizedAt = clock.UtcNow;
-                yield return new TranscriptUnit(remainder, recognizedAt, recognizedAt - startedAt);
+                yield return new TranscriptUnit(remainder, recognizedAt, recognizedAt - startedAt)
+                {
+                    AudioSource = experience?.LastAudioActivity?.Source ?? "未知"
+                };
             }
         }
         finally
         {
             lifetime.Cancel();
             await IgnoreCancellationAsync(sendTask);
-            await session.CloseAsync();
+            try
+            {
+                await session.CloseAsync();
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException && cancellation.IsCancellationRequested)
+            {
+            }
         }
     }
+
+    private void Report(
+        LiveTranscriptState state,
+        string status,
+        string committed,
+        string interim) => experience?.ReportTranscript(new LiveTranscriptPreview(
+            committed,
+            interim,
+            state,
+            status,
+            clock.UtcNow));
 
     private static async Task SendAudioAsync(
         AsyncSession session,

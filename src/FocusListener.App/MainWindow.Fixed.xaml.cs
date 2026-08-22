@@ -50,6 +50,7 @@ public partial class MainWindow : Window
         _windowSource?.AddHook(WindowProcedure);
         _registeredHotKey = RegisterHotKey(handle, ManualTriggerHotKeyId,
             ModifierControl | ModifierShift, VirtualKeyQ);
+        RegisterExperienceHotKeysV3(handle);
     }
 
     private void Window_Loaded(object sender, RoutedEventArgs e)
@@ -428,6 +429,11 @@ public partial class MainWindow : Window
             handled = true;
         }
 
+        if (message == hotKeyMessage && HandleExperienceHotKeyV3(wParam.ToInt32()))
+        {
+            handled = true;
+        }
+
         return IntPtr.Zero;
     }
 
@@ -444,11 +450,13 @@ public partial class MainWindow : Window
 
     private void Window_Closing(object? sender, CancelEventArgs e)
     {
+        var handle = new WindowInteropHelper(this).Handle;
         _countdownTimer.Stop();
         _lifetime.Cancel();
+        CloseAudioExperienceV3(handle);
         if (_registeredHotKey)
         {
-            UnregisterHotKey(new WindowInteropHelper(this).Handle, ManualTriggerHotKeyId);
+            UnregisterHotKey(handle, ManualTriggerHotKeyId);
         }
         _windowSource?.RemoveHook(WindowProcedure);
         _lifetime.Dispose();

@@ -109,6 +109,7 @@ public sealed record QuestionCardView(
 {
     public string Subject { get; init; } = "其他";
     public string Language { get; init; } = "und";
+    public LessonEvidence? Evidence { get; init; }
 }
 
 public sealed record AnswerFeedback(

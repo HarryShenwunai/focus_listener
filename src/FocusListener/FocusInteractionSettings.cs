@@ -13,6 +13,23 @@ public sealed record FocusInteractionSettings
     public int PendingLifetimeSeconds { get; init; } = 120;
     public int FeedbackSeconds { get; init; } = 3;
     public bool CandidateReadyAnimation { get; init; } = true;
+    public AudioCaptureMode AudioMode { get; init; } = AudioCaptureMode.Automatic;
+    public string? MicrophoneDeviceId { get; init; }
+    public string? MicrophoneDeviceName { get; init; }
+    public string? SystemPlaybackDeviceId { get; init; }
+    public string? SystemPlaybackDeviceName { get; init; }
+    public bool AudioSetupCompleted { get; init; }
+    public bool RealTimeTranscriptionEnabled { get; init; } = true;
+    public bool SubtitleWindowEnabled { get; init; } = true;
+    public bool SubtitleClickThrough { get; init; } = true;
+    public double SubtitleBackgroundOpacity { get; init; } = 0.58;
+    public double SubtitleFontSize { get; init; } = 28;
+    public double? SubtitleLeft { get; init; }
+    public double? SubtitleTop { get; init; }
+    public double SubtitleWidth { get; init; } = 820;
+    public double SubtitleHeight { get; init; } = 150;
+    public string SubtitleToggleKey { get; init; } = "S";
+    public string SubtitleLockKey { get; init; } = "L";
 
     public static FocusInteractionSettings Default { get; } = new();
 
@@ -27,6 +44,40 @@ public sealed record FocusInteractionSettings
         InRange(ExtendedAnswerSeconds, 6, 60, "延长后总答题时间", errors);
         InRange(PendingLifetimeSeconds, 30, 600, "待答题保留时间", errors);
         InRange(FeedbackSeconds, 1, 10, "反馈显示时间", errors);
+
+        if (!Enum.IsDefined(AudioMode))
+        {
+            errors.Add("请选择有效的音频工作模式。");
+        }
+
+        if (SubtitleBackgroundOpacity is < 0.25 or > 0.9)
+        {
+            errors.Add("字幕背景透明度应在 25%–90% 之间。");
+        }
+
+        if (SubtitleFontSize is < 18 or > 54)
+        {
+            errors.Add("字幕字号应在 18–54 之间。");
+        }
+
+        if (SubtitleWidth is < 360 or > 2400 || SubtitleHeight is < 90 or > 600)
+        {
+            errors.Add("字幕窗口大小超出可用范围。");
+        }
+
+        ValidateShortcut(SubtitleToggleKey, "显示/隐藏字幕快捷键", errors);
+        ValidateShortcut(SubtitleLockKey, "锁定/解锁字幕快捷键", errors);
+        var subtitleToggleKey = SubtitleToggleKey?.Trim();
+        var subtitleLockKey = SubtitleLockKey?.Trim();
+        if (string.Equals(subtitleToggleKey, subtitleLockKey, StringComparison.OrdinalIgnoreCase))
+        {
+            errors.Add("两个字幕快捷键不能使用同一个字母。");
+        }
+        if (string.Equals(subtitleToggleKey, "Q", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(subtitleLockKey, "Q", StringComparison.OrdinalIgnoreCase))
+        {
+            errors.Add("字幕快捷键不能使用 Q，因为 Ctrl + Shift + Q 已用于立即提问。");
+        }
 
         if (CandidateLifetimeSeconds < AutoCooldownSeconds + 30)
         {
@@ -72,6 +123,16 @@ public sealed record FocusInteractionSettings
             errors.Add($"{name}应在 {minimum}–{maximum} 秒之间。");
         }
     }
+
+    private static void ValidateShortcut(string value, string name, ICollection<string> errors)
+    {
+        var normalized = value?.Trim() ?? string.Empty;
+        if (normalized.Length != 1 ||
+            (normalized[0] is < 'A' or > 'Z') && (normalized[0] is < 'a' or > 'z'))
+        {
+            errors.Add($"{name}应填写一个英文字母。");
+        }
+    }
 }
 
 public sealed class FocusInteractionSettingsStore(string settingsPath)
@@ -80,6 +141,7 @@ public sealed class FocusInteractionSettingsStore(string settingsPath)
     {
         WriteIndented = true
     };
+    private readonly SemaphoreSlim _saveGate = new(1, 1);
 
     public string SettingsPath { get; } = Path.GetFullPath(settingsPath);
 
@@ -120,18 +182,26 @@ public sealed class FocusInteractionSettingsStore(string settingsPath)
             throw new ArgumentException(string.Join(Environment.NewLine, errors), nameof(settings));
         }
 
-        var directory = Path.GetDirectoryName(SettingsPath);
-        if (!string.IsNullOrWhiteSpace(directory))
+        await _saveGate.WaitAsync(cancellation);
+        try
         {
-            Directory.CreateDirectory(directory);
-        }
+            var directory = Path.GetDirectoryName(SettingsPath);
+            if (!string.IsNullOrWhiteSpace(directory))
+            {
+                Directory.CreateDirectory(directory);
+            }
 
-        var temporaryPath = SettingsPath + ".new";
-        await File.WriteAllTextAsync(
-            temporaryPath,
-            JsonSerializer.Serialize(settings, JsonOptions),
-            cancellation);
-        File.Move(temporaryPath, SettingsPath, true);
+            var temporaryPath = SettingsPath + ".new";
+            await File.WriteAllTextAsync(
+                temporaryPath,
+                JsonSerializer.Serialize(settings, JsonOptions),
+                cancellation);
+            File.Move(temporaryPath, SettingsPath, true);
+        }
+        finally
+        {
+            _saveGate.Release();
+        }
     }
 }
 

@@ -628,6 +628,9 @@ internal sealed class FocusSession : IFocusSession
         candidate.Language,
         candidate.QualityScore,
         PriorityScore = _scheduler!.Priority(candidate, now),
+        QuestionStem = candidate.Question.Stem,
+        EvidenceExcerpt = candidate.Evidence.Excerpt,
+        candidate.AudioSource,
         Trigger = candidate.Trigger.ToString(),
         candidate.RecognizedAt
     };
@@ -659,7 +662,8 @@ internal sealed class FocusSession : IFocusSession
                 _current.Candidate.Trigger)
             {
                 Subject = _current.Candidate.Subject,
-                Language = _current.Candidate.Language
+                Language = _current.Candidate.Language,
+                Evidence = _current.Candidate.Evidence
             };
 
         _views?.Report(new SessionView(

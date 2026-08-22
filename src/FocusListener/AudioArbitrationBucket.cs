@@ -17,13 +17,36 @@ internal sealed class AudioArbitrationBucket(double systemActivityThreshold)
         }
     }
 
-    public PcmAudioFrame? Select()
+    public PcmAudioFrame? Select() => Select(AudioCaptureMode.SmartMix);
+
+    public PcmAudioFrame? Select(AudioCaptureMode mode)
     {
         var system = Combine(_systemPlayback, ClassroomAudioRoute.SystemPlayback);
         var microphone = Combine(_microphone, ClassroomAudioRoute.Microphone);
-        return system is { } activeSystem && activeSystem.RootMeanSquare >= systemActivityThreshold
-            ? activeSystem
-            : microphone ?? system;
+        return mode switch
+        {
+            AudioCaptureMode.Microphone => microphone,
+            AudioCaptureMode.SystemPlayback => system,
+            AudioCaptureMode.Automatic => Louder(microphone, system),
+            _ => system is { } activeSystem && activeSystem.RootMeanSquare >= systemActivityThreshold
+                ? activeSystem
+                : microphone ?? system
+        };
+    }
+
+    private static PcmAudioFrame? Louder(PcmAudioFrame? microphone, PcmAudioFrame? system)
+    {
+        if (microphone is null)
+        {
+            return system;
+        }
+
+        if (system is null)
+        {
+            return microphone;
+        }
+
+        return system.RootMeanSquare > microphone.RootMeanSquare ? system : microphone;
     }
 
     private static PcmAudioFrame? Combine(

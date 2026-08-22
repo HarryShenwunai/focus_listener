@@ -6,9 +6,8 @@ using NAudio.Wave;
 
 namespace FocusListener;
 
-internal sealed class WindowsDiagnosticAudioSource
+internal sealed class WindowsDiagnosticAudioSource(AudioCaptureConfiguration configuration)
 {
-    private const int SampleRate = 16_000;
     private const int BufferMilliseconds = 100;
     private const double AudibleSignalThreshold = 0.006;
     private static readonly long BucketStopwatchTicks = Math.Max(
@@ -22,38 +21,48 @@ internal sealed class WindowsDiagnosticAudioSource
     {
         ArgumentNullException.ThrowIfNull(progress);
         var faults = new ConcurrentQueue<Exception>();
-        WasapiRecorder? microphone = TryBuildRecorder(loopback: false, faults);
-        WasapiRecorder? playback = TryBuildRecorder(loopback: true, faults);
+        var microphone = WindowsAudioRecorderFactory.TryCreate(
+            ClassroomAudioRoute.Microphone,
+            configuration.MicrophoneDeviceId,
+            faults);
+        var playback = WindowsAudioRecorderFactory.TryCreate(
+            ClassroomAudioRoute.SystemPlayback,
+            configuration.SystemPlaybackDeviceId,
+            faults);
 
         progress.Report(new FocusDiagnosticSignal(
             FocusDiagnosticId.MicrophoneLevel,
             FocusDiagnosticState.Running,
-            microphone is null ? "正在确认麦克风端点…" : "已打开，等待你说话",
+            microphone is null
+                ? $"无法打开：{configuration.MicrophoneDeviceName}"
+                : $"已打开：{configuration.MicrophoneDeviceName} · 请朗读测试句",
             0));
         progress.Report(new FocusDiagnosticSignal(
             FocusDiagnosticId.SystemSoundLevel,
             FocusDiagnosticState.Running,
-            playback is null ? "正在确认系统回放端点…" : "已打开，等待电脑播放声音",
+            playback is null
+                ? $"无法打开：{configuration.SystemPlaybackDeviceName}"
+                : $"已打开：{configuration.SystemPlaybackDeviceName} · 将播放轻柔测试音",
             0));
         progress.Report(new FocusDiagnosticSignal(
             FocusDiagnosticId.AudioRoute,
             FocusDiagnosticState.Running,
-            "等待音频信号"));
+            $"{configuration.DisplayName} · 等待音频信号"));
 
         if (microphone is null && playback is null)
         {
             progress.Report(new FocusDiagnosticSignal(
                 FocusDiagnosticId.MicrophoneLevel,
                 FocusDiagnosticState.Failed,
-                "无法打开麦克风，请检查 Windows 麦克风权限"));
+                "无法打开所选麦克风；请重新选择设备并检查 Windows 麦克风权限"));
             progress.Report(new FocusDiagnosticSignal(
                 FocusDiagnosticId.SystemSoundLevel,
                 FocusDiagnosticState.Failed,
-                "无法打开默认系统输出设备"));
+                "无法打开所选系统输出；请重新选择正在播放声音的设备"));
             progress.Report(new FocusDiagnosticSignal(
                 FocusDiagnosticId.AudioRoute,
                 FocusDiagnosticState.Failed,
-                "没有可用的音频输入"));
+                "所选音频设备均不可用"));
             yield break;
         }
 
@@ -69,12 +78,22 @@ internal sealed class WindowsDiagnosticAudioSource
         var pumps = new List<Task>(2);
         if (microphone is not null)
         {
-            pumps.Add(PumpAsync(microphone, ClassroomAudioRoute.Microphone, rawFrames.Writer, faults, captureLifetime.Token));
+            pumps.Add(PumpAsync(
+                microphone.Recorder,
+                ClassroomAudioRoute.Microphone,
+                rawFrames.Writer,
+                faults,
+                captureLifetime.Token));
         }
 
         if (playback is not null)
         {
-            pumps.Add(PumpAsync(playback, ClassroomAudioRoute.SystemPlayback, rawFrames.Writer, faults, captureLifetime.Token));
+            pumps.Add(PumpAsync(
+                playback.Recorder,
+                ClassroomAudioRoute.SystemPlayback,
+                rawFrames.Writer,
+                faults,
+                captureLifetime.Token));
         }
 
         var completion = CompleteChannelAsync(pumps, rawFrames.Writer);
@@ -95,7 +114,8 @@ internal sealed class WindowsDiagnosticAudioSource
                     progress.Report(LevelSignal(
                         FocusDiagnosticId.MicrophoneLevel,
                         raw.RootMeanSquare,
-                        microphonePeak));
+                        microphonePeak,
+                        configuration.MicrophoneDeviceName ?? "所选麦克风"));
                 }
                 else
                 {
@@ -103,7 +123,8 @@ internal sealed class WindowsDiagnosticAudioSource
                     progress.Report(LevelSignal(
                         FocusDiagnosticId.SystemSoundLevel,
                         raw.RootMeanSquare,
-                        playbackPeak));
+                        playbackPeak,
+                        configuration.SystemPlaybackDeviceName ?? "所选系统输出"));
                 }
 
                 latestBucket = Math.Max(latestBucket, raw.TimeBucket);
@@ -113,18 +134,11 @@ internal sealed class WindowsDiagnosticAudioSource
                     buckets.Add(raw.TimeBucket, bucket);
                 }
 
-                bucket.Add(new PcmAudioFrame(
-                    raw.TimeBucket,
-                    raw.Route,
-                    raw.Pcm16,
-                    raw.RootMeanSquare));
+                bucket.Add(new PcmAudioFrame(raw.TimeBucket, raw.Route, raw.Pcm16, raw.RootMeanSquare));
                 foreach (var selected in DrainReady(buckets, latestBucket - 2))
                 {
                     CountSelection(selected.Route, ref microphoneSelections, ref playbackSelections);
-                    progress.Report(new FocusDiagnosticSignal(
-                        FocusDiagnosticId.AudioRoute,
-                        FocusDiagnosticState.Running,
-                        RouteDetail(selected.Route)));
+                    progress.Report(RouteSignal(selected.Route));
                     yield return selected;
                 }
             }
@@ -132,10 +146,7 @@ internal sealed class WindowsDiagnosticAudioSource
             foreach (var selected in DrainReady(buckets, long.MaxValue))
             {
                 CountSelection(selected.Route, ref microphoneSelections, ref playbackSelections);
-                progress.Report(new FocusDiagnosticSignal(
-                    FocusDiagnosticId.AudioRoute,
-                    FocusDiagnosticState.Running,
-                    RouteDetail(selected.Route)));
+                progress.Report(RouteSignal(selected.Route));
                 yield return selected;
             }
 
@@ -160,14 +171,16 @@ internal sealed class WindowsDiagnosticAudioSource
             progress,
             FocusDiagnosticId.MicrophoneLevel,
             microphone is not null,
+            configuration.Requires(ClassroomAudioRoute.Microphone),
             microphonePeak,
-            "请检查麦克风权限和输入设备，并在检测时说话");
+            $"请确认已选择正在使用的麦克风：{configuration.MicrophoneDeviceName}");
         ReportFinalLevel(
             progress,
             FocusDiagnosticId.SystemSoundLevel,
             playback is not null,
+            configuration.Requires(ClassroomAudioRoute.SystemPlayback),
             playbackPeak,
-            "请让电脑播放一段声音，并检查默认输出设备");
+            $"请确认已选择正在播放声音的设备：{configuration.SystemPlaybackDeviceName}");
 
         var totalSelections = microphoneSelections + playbackSelections;
         if (totalSelections == 0)
@@ -175,7 +188,7 @@ internal sealed class WindowsDiagnosticAudioSource
             progress.Report(new FocusDiagnosticSignal(
                 FocusDiagnosticId.AudioRoute,
                 FocusDiagnosticState.Failed,
-                "未取得可仲裁的音频帧"));
+                $"{configuration.DisplayName}没有取得可用音频帧；请重新选择设备"));
         }
         else
         {
@@ -186,7 +199,8 @@ internal sealed class WindowsDiagnosticAudioSource
             progress.Report(new FocusDiagnosticSignal(
                 FocusDiagnosticId.AudioRoute,
                 activePeak >= AudibleSignalThreshold ? FocusDiagnosticState.Passed : FocusDiagnosticState.Warning,
-                $"{RouteName(selectedRoute)}为主 · 麦克风 {microphoneSelections} 帧 / 系统声音 {playbackSelections} 帧"));
+                $"{configuration.DisplayName} · {RouteName(selectedRoute)}为主 · " +
+                $"麦克风 {microphoneSelections} 帧 / 系统声音 {playbackSelections} 帧"));
         }
 
         if (!faults.IsEmpty && totalSelections > 0)
@@ -194,39 +208,11 @@ internal sealed class WindowsDiagnosticAudioSource
             progress.Report(new FocusDiagnosticSignal(
                 FocusDiagnosticId.AudioRoute,
                 FocusDiagnosticState.Warning,
-                "音频可用，但有一个采集端点在检测途中中断"));
+                "音频可用，但有一个所选设备在检测途中中断"));
         }
     }
 
-    private static WasapiRecorder? TryBuildRecorder(bool loopback, ConcurrentQueue<Exception> faults)
-    {
-        try
-        {
-            var builder = new WasapiRecorderBuilder()
-                .WithSharedMode()
-                .WithEventSync()
-                .WithBufferLength(BufferMilliseconds)
-                .WithFormat(new WaveFormat(SampleRate, 16, 1))
-                .WithMmcssThreadPriority("Capture");
-            if (loopback)
-            {
-                builder.WithLoopbackCapture();
-            }
-            else
-            {
-                builder.WithCommunicationsMode();
-            }
-
-            return builder.Build();
-        }
-        catch (Exception exception)
-        {
-            faults.Enqueue(exception);
-            return null;
-        }
-    }
-
-    private static async Task PumpAsync(
+    private async Task PumpAsync(
         WasapiRecorder recorder,
         ClassroomAudioRoute route,
         ChannelWriter<DiagnosticRawFrame> output,
@@ -267,7 +253,7 @@ internal sealed class WindowsDiagnosticAudioSource
         writer.TryComplete();
     }
 
-    private static IEnumerable<PcmAudioFrame> DrainReady(
+    private IEnumerable<PcmAudioFrame> DrainReady(
         SortedDictionary<long, AudioArbitrationBucket> buckets,
         long inclusiveMaximum)
     {
@@ -276,13 +262,18 @@ internal sealed class WindowsDiagnosticAudioSource
         {
             var bucket = buckets[key];
             buckets.Remove(key);
-            var selected = bucket.Select();
+            var selected = bucket.Select(configuration.Mode);
             if (selected is not null)
             {
                 yield return selected;
             }
         }
     }
+
+    private FocusDiagnosticSignal RouteSignal(ClassroomAudioRoute route) => new(
+        FocusDiagnosticId.AudioRoute,
+        FocusDiagnosticState.Running,
+        $"{configuration.DisplayName} · 正在采用{RouteName(route)}");
 
     private static void CountSelection(
         ClassroomAudioRoute route,
@@ -302,22 +293,28 @@ internal sealed class WindowsDiagnosticAudioSource
     private static FocusDiagnosticSignal LevelSignal(
         FocusDiagnosticId id,
         double current,
-        double peak) => new(
+        double peak,
+        string deviceName) => new(
             id,
             FocusDiagnosticState.Running,
-            $"当前 {ToDb(current):0} dBFS · 峰值 {ToDb(peak):0} dBFS",
+            $"{deviceName} · 当前 {ToDb(current):0} dBFS · 峰值 {ToDb(peak):0} dBFS",
             ToMeter(current));
 
     private static void ReportFinalLevel(
         IProgress<FocusDiagnosticSignal> progress,
         FocusDiagnosticId id,
         bool endpointOpened,
+        bool required,
         double peak,
         string recovery)
     {
         if (!endpointOpened)
         {
-            progress.Report(new FocusDiagnosticSignal(id, FocusDiagnosticState.Failed, recovery, 0));
+            progress.Report(new FocusDiagnosticSignal(
+                id,
+                required ? FocusDiagnosticState.Failed : FocusDiagnosticState.Warning,
+                recovery,
+                0));
             return;
         }
 
@@ -339,17 +336,9 @@ internal sealed class WindowsDiagnosticAudioSource
         }
     }
 
-    private static string RouteDetail(ClassroomAudioRoute route) => route switch
-    {
-        ClassroomAudioRoute.SystemPlayback => "系统声音（检测到电脑播放，优先采用）",
-        _ => "麦克风（系统声音静音时采用）"
-    };
-
-    private static string RouteName(ClassroomAudioRoute route) => route switch
-    {
-        ClassroomAudioRoute.SystemPlayback => "系统声音",
-        _ => "麦克风"
-    };
+    private static string RouteName(ClassroomAudioRoute route) => route == ClassroomAudioRoute.SystemPlayback
+        ? "系统声音"
+        : "麦克风";
 
     private static double CalculateRootMeanSquare(ReadOnlySpan<byte> pcm)
     {

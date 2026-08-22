@@ -72,6 +72,37 @@
                                Foreground="{StaticResource InkBrush}" />
                     <TextBlock x:Name="ListeningNotice" Margin="0,8,0,13" TextWrapping="Wrap"
                                Foreground="{StaticResource MutedBrush}" Text="等待出现完整、可复述的知识点…" />
+                    <Border Margin="0,0,0,10" Background="#F0F5F1" CornerRadius="11" Padding="11,9">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel>
+                                <TextBlock x:Name="AudioSourceText" Text="音频：等待开始" FontSize="11"
+                                           Foreground="{StaticResource MutedBrush}" TextTrimming="CharacterEllipsis" />
+                                <ProgressBar x:Name="AudioLevelMeter" Minimum="0" Maximum="100" Value="0"
+                                             Height="5" Margin="0,6,10,0" BorderThickness="0"
+                                             Background="#DCE5DE" Foreground="{StaticResource AccentBrush}" />
+                            </StackPanel>
+                            <Button Grid.Column="1" Content="更换设备" Click="AudioSettings_Click"
+                                    Padding="8,4" Background="Transparent" Foreground="{StaticResource AccentBrush}" />
+                        </Grid>
+                    </Border>
+                    <WrapPanel Margin="0,0,0,9">
+                        <Button x:Name="TranscriptionToggleButton" Click="TranscriptionToggle_Click"
+                                Content="转写：开" Margin="0,0,6,6" Padding="9,5"
+                                Background="Transparent" Foreground="{StaticResource AccentBrush}" />
+                        <Button x:Name="SubtitleToggleButton" Click="SubtitleToggle_Click"
+                                Content="字幕：显示" Margin="0,0,6,6" Padding="9,5"
+                                Background="Transparent" Foreground="{StaticResource AccentBrush}" />
+                        <Button x:Name="SubtitleLockButton" Click="SubtitleLock_Click"
+                                Content="字幕：已锁定" Margin="0,0,6,6" Padding="9,5"
+                                Background="Transparent" Foreground="{StaticResource MutedBrush}" />
+                        <Button x:Name="RetryTranscriptionButton" Click="RetryTranscription_Click"
+                                Content="重试转写" Margin="0,0,6,6" Padding="9,5" Visibility="Collapsed"
+                                Background="#FFF1CD" Foreground="#76520E" />
+                    </WrapPanel>
                     <Button x:Name="CandidateReadyButton" Click="CandidateReady_Click" Visibility="Collapsed"
                             Margin="0,0,0,9" Padding="12,7" HorizontalAlignment="Left"
                             Background="#E4F3EB" Foreground="#1D6B4B" ToolTip="点击立即使用最新知识点出题">

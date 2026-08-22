@@ -11,6 +11,8 @@ internal sealed class LiveTranscriptionCollector
     private string _committed = string.Empty;
     private string _interim = string.Empty;
 
+    public string CommittedText => _committed;
+    public string InterimText => _interim;
     public string Text => Combine(_committed, _interim);
     public bool IsFinished { get; private set; }
 

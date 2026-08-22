@@ -17,6 +17,8 @@ internal sealed class SystemDiagnosticsWindow : Window
 
     private readonly string? _apiKey;
     private readonly string _outputDirectory;
+    private readonly FocusInteractionSettingsStore _settingsStore;
+    private readonly AudioDevicePicker _audioPicker = new();
     private readonly Dictionary<FocusDiagnosticId, DiagnosticRowVisual> _rows = [];
     private readonly TextBlock _headline = new();
     private readonly TextBlock _summary = new();
@@ -34,15 +36,18 @@ internal sealed class SystemDiagnosticsWindow : Window
     private CancellationTokenSource? _runLifetime;
     private bool _closed;
 
-    public SystemDiagnosticsWindow(string? apiKey, string outputDirectory)
+    public SystemDiagnosticsWindow(string? apiKey, string outputDirectory, FocusInteractionSettingsStore settingsStore)
     {
         _apiKey = apiKey;
         _outputDirectory = outputDirectory;
+        _settingsStore = settingsStore;
+        var availableHeight = Math.Max(520, SystemParameters.WorkArea.Height - 32);
         Title = "Focus Listener · 一键系统检测";
         Width = 720;
-        Height = 780;
+        Height = Math.Min(780, availableHeight);
+        MaxHeight = availableHeight;
         MinWidth = 620;
-        MinHeight = 620;
+        MinHeight = Math.Min(580, availableHeight);
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
         ResizeMode = ResizeMode.CanResize;
         ShowInTaskbar = false;
@@ -50,6 +55,7 @@ internal sealed class SystemDiagnosticsWindow : Window
         FontFamily = new FontFamily("Microsoft YaHei UI");
         Foreground = InkBrush;
         Content = BuildContent();
+        _audioPicker.Load(_settingsStore.Load());
         Closed += Window_Closed;
     }
 
@@ -83,6 +89,8 @@ internal sealed class SystemDiagnosticsWindow : Window
             HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled
         };
         var body = new StackPanel();
+        body.Children.Add(SectionTitle("检测所用音频设备"));
+        body.Children.Add(_audioPicker.Build());
         body.Children.Add(BuildInstruction());
         body.Children.Add(BuildAudioPanel());
         body.Children.Add(SectionTitle("逐项结果"));
@@ -99,7 +107,7 @@ internal sealed class SystemDiagnosticsWindow : Window
         footer.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         footer.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         footer.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        _summary.Text = "准备就绪 · 整个检测约需 20–35 秒";
+        _summary.Text = "准备就绪 · 音频会等待 15 秒，整个检测约需 30–50 秒";
         _summary.Foreground = MutedBrush;
         _summary.FontSize = 12;
         _summary.VerticalAlignment = VerticalAlignment.Center;
@@ -134,7 +142,7 @@ internal sealed class SystemDiagnosticsWindow : Window
     {
         var text = new TextBlock
         {
-            Text = "点击开始后，请在 10 秒音频检测期间清晰朗读一两句包含完整知识关系的课堂内容。\n测试题只会根据本次实时转写和正式课堂规则生成；没有合格转写时会显示具体原因，不会用固定素材代替。\n要测试系统声音，请同时让电脑播放相关的有声内容。",
+            Text = "点击开始后，请准备一两句包含完整知识关系的课堂内容：仅麦克风模式直接朗读；仅系统声音模式请让电脑播放这段语音；自动或智能混合可任选。\n系统会通过所选输出设备播放一段轻柔测试音；麦克风声音不会回放。\n测试题只会根据本次实时转写生成，没有可靠证据时不会用固定素材代替。",
             TextWrapping = TextWrapping.Wrap,
             LineHeight = 22,
             Foreground = InformationTextBrush,
@@ -373,9 +381,12 @@ internal sealed class SystemDiagnosticsWindow : Window
         ResetPreviews();
 
         var options = string.IsNullOrWhiteSpace(_apiKey) ? null : new GeminiFocusOptions(_apiKey);
-        var diagnostics = TranscriptAwareFocusDiagnosticsFactory.Create(options, _outputDirectory);
         try
         {
+            var settings = _audioPicker.ApplyTo(_settingsStore.Load());
+            await _settingsStore.SaveAsync(settings, _runLifetime.Token);
+            var diagnostics = TranscriptAwareFocusDiagnosticsFactory.Create(
+                options, _outputDirectory, AudioCaptureConfiguration.From(settings));
             var result = await diagnostics.RunAsync(
                 new Progress<FocusDiagnosticsView>(Render),
                 _runLifetime.Token);
@@ -516,6 +527,7 @@ internal sealed class SystemDiagnosticsWindow : Window
     {
         _closed = true;
         _runLifetime?.Cancel();
+        _audioPicker.Dispose();
     }
 
     private static string DiagnosticTitle(FocusDiagnosticId id) => id switch

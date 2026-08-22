@@ -25,6 +25,7 @@ public partial class MainWindow
         _settingsStoreV2 = new FocusInteractionSettingsStore(SettingsPathV2);
         _activeSettingsV2 = _settingsStoreV2.Load();
         UpdateModeLabelV2();
+        InitializeAudioExperienceV3();
     }
 
     private async void StartSessionV2_Click(object sender, RoutedEventArgs e)
@@ -36,15 +37,22 @@ public partial class MainWindow
 
         _settingsStoreV2 ??= new FocusInteractionSettingsStore(SettingsPathV2);
         _activeSettingsV2 = _settingsStoreV2.Load();
+        var live = !string.IsNullOrWhiteSpace(_apiKey);
+        if (!EnsureAudioSetupV3(live))
+        {
+            return;
+        }
+
+        var experience = PrepareAudioExperienceV3(live);
         StartPanel.Visibility = Visibility.Collapsed;
         SessionFooter.Visibility = Visibility.Visible;
         StatusText.Text = _registeredHotKey ? "快捷键：Ctrl + Shift + Q" : "全局快捷键被占用，可点击手动触发";
-        var live = !string.IsNullOrWhiteSpace(_apiKey);
         _session = live
             ? UniversalFocusSessionFactory.CreateProduction(
                 new GeminiFocusOptions(_apiKey!),
                 _databasePath,
-                _activeSettingsV2)
+                _activeSettingsV2,
+                experience!)
             : UniversalFocusSessionFactory.CreateSimulation(_databasePath, _activeSettingsV2);
         ModeLabel.Text = live
             ? "真实课堂 · 全学科知识点"
@@ -71,11 +79,16 @@ public partial class MainWindow
             SummaryText.Text = $"会话意外停止：{exception.Message}";
             StatusText.Text = "错误";
         }
+        finally
+        {
+            FinishAudioExperienceV3();
+        }
     }
 
     private void RenderV2(SessionView view)
     {
         Render(view);
+        RenderAudioExperienceV3(view);
         CandidateReadyButton.Visibility = view.Surface == SessionSurfaceKind.Listening && view.CandidateReady
             ? Visibility.Visible
             : Visibility.Collapsed;
@@ -88,23 +101,7 @@ public partial class MainWindow
 
     private void Settings_Click(object sender, RoutedEventArgs e)
     {
-        _settingsStoreV2 ??= new FocusInteractionSettingsStore(SettingsPathV2);
-        var window = new SettingsWindow(
-            _settingsStoreV2,
-            _databasePath,
-            DiagnosticsDirectoryV2,
-            _sessionTask is null)
-        {
-            Owner = this,
-            Topmost = true
-        };
-        if (window.ShowDialog() == true)
-        {
-            _activeSettingsV2 = _settingsStoreV2.Load();
-            StatusText.Text = _sessionTask is null
-                ? "设置已保存，将在下一次课堂生效。"
-                : "设置已保存，将从下一次课堂开始生效。";
-        }
+        ShowSettingsV3();
     }
 
     private async void CandidateReady_Click(object sender, RoutedEventArgs e) =>

@@ -7,14 +7,16 @@ public static class UniversalFocusSessionFactory
     public static IFocusSession CreateProduction(
         GeminiFocusOptions options,
         string databasePath,
-        FocusInteractionSettings settings)
+        FocusInteractionSettings settings,
+        ClassroomExperienceControl experience)
     {
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(settings);
+        ArgumentNullException.ThrowIfNull(experience);
         options.Validate();
         var clock = new SystemSessionClock();
         return new FocusSession(
-            new GeminiQuestionCandidateAdapter(options, clock),
+            new ClassroomQuestionCandidateAdapter(options, clock, experience),
             new SqliteSessionJournalAdapter(databasePath),
             clock,
             settings.ToSessionTiming());
