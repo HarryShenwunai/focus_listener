@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="src/FocusListener/FocusListener.csproj" />
+  <Project Path="src/FocusListener.App/FocusListener.App.csproj" />
+  <Project Path="tests/FocusListener.Tests/FocusListener.Tests.csproj" />
+</Solution>

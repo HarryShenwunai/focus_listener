@@ -1,0 +1,17 @@
+<Project>
+  <ItemGroup Condition="'$(MSBuildProjectName)' == 'FocusListener.App'">
+    <ApplicationDefinition Remove="App.xaml" />
+    <Page Remove="MainWindow.xaml" />
+    <Page Remove="App.Fixed.xaml" />
+    <Page Remove="MainWindow.Fixed.xaml" />
+
+    <ApplicationDefinition Include="App.Fixed.xaml">
+      <Generator>MSBuild:Compile</Generator>
+      <SubType>Designer</SubType>
+    </ApplicationDefinition>
+    <Page Include="MainWindow.Fixed.xaml">
+      <Generator>MSBuild:Compile</Generator>
+      <SubType>Designer</SubType>
+    </Page>
+  </ItemGroup>
+</Project>

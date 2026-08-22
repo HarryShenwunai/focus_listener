@@ -1,0 +1,341 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Focus Session 状态机实验台（可丢弃原型）</title>
+  <style>
+    :root { color-scheme: light; --ink:#17202a; --muted:#667085; --line:#dde3ea; --panel:#f7f9fc; --accent:#2563eb; --danger:#b42318; --ok:#067647; }
+    * { box-sizing: border-box; }
+    body { margin:0; font:15px/1.55 system-ui,"Microsoft YaHei",sans-serif; color:var(--ink); background:#eef2f7; }
+    main { width:min(1120px,calc(100% - 32px)); margin:28px auto 56px; }
+    h1 { margin:0 0 8px; font-size:28px; }
+    h2 { margin:0 0 14px; font-size:19px; }
+    p { margin:6px 0; }
+    .intro,.card { background:white; border:1px solid var(--line); border-radius:14px; padding:18px; box-shadow:0 8px 24px rgba(23,32,42,.05); }
+    .intro { border-left:5px solid var(--accent); }
+    .throwaway { display:inline-block; margin-bottom:8px; padding:3px 8px; border-radius:99px; background:#fff1f0; color:var(--danger); font-weight:700; font-size:12px; }
+    .grid { display:grid; grid-template-columns:1.25fr .75fr; gap:16px; margin-top:16px; }
+    .state-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; }
+    .field { padding:11px; border:1px solid var(--line); border-radius:10px; background:var(--panel); min-height:74px; }
+    .field b { display:block; color:var(--muted); font-size:12px; margin-bottom:4px; }
+    .value { font-weight:700; overflow-wrap:anywhere; }
+    .notice { margin-top:12px; min-height:44px; padding:10px 12px; border-radius:9px; background:#eff6ff; color:#1d4ed8; }
+    .actions { display:flex; flex-wrap:wrap; gap:8px; }
+    button { border:1px solid #cbd5e1; background:#fff; color:var(--ink); border-radius:9px; padding:8px 11px; cursor:pointer; font:inherit; }
+    button:hover { border-color:var(--accent); color:var(--accent); }
+    button.primary { background:var(--accent); color:white; border-color:var(--accent); }
+    button.danger { color:var(--danger); }
+    button:disabled { opacity:.45; cursor:not-allowed; }
+    .log { margin:0; padding-left:22px; max-height:290px; overflow:auto; color:#344054; }
+    .tabs { display:flex; gap:7px; flex-wrap:wrap; margin-bottom:12px; }
+    .tab.active { background:#17202a; color:white; border-color:#17202a; }
+    .scenario { display:none; }
+    .scenario.active { display:block; }
+    .steps { display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; }
+    .steps button.done { background:#ecfdf3; color:var(--ok); border-color:#abefc6; }
+    .json { white-space:pre-wrap; font:12px/1.45 ui-monospace,SFMono-Regular,Consolas,monospace; background:#111827; color:#d1fae5; padding:12px; border-radius:10px; max-height:330px; overflow:auto; }
+    @media (max-width:800px){ .grid{grid-template-columns:1fr}.state-grid{grid-template-columns:1fr 1fr} }
+  </style>
+</head>
+<body>
+<main>
+  <section class="intro">
+    <span class="throwaway">可丢弃逻辑原型 · 不属于生产代码</span>
+    <h1>Focus Session 状态机实验台</h1>
+    <p><strong>要回答的问题：</strong>在“自动触发无冷却、一个当前题、最多一个排队题、待答题阻塞队列、8 秒可延长一次、反馈 3 秒后自动换题”的规则下，状态是否可理解、可恢复且不会形成无限积压？</p>
+    <p>请按场景逐步点击，也可以在自由操作区乱序点击。每次操作后都会显示完整相关状态和拒绝原因。</p>
+  </section>
+
+  <div class="grid">
+    <section class="card">
+      <h2>当前状态</h2>
+      <div class="state-grid">
+        <div class="field"><b>模拟时间</b><span id="now" class="value"></span></div>
+        <div class="field"><b>学习者表面</b><span id="surface" class="value"></span></div>
+        <div class="field"><b>最近合格知识单元</b><span id="eligible" class="value"></span></div>
+        <div class="field"><b>当前题</b><span id="current" class="value"></span></div>
+        <div class="field"><b>排队题</b><span id="queued" class="value"></span></div>
+        <div class="field"><b>分析计数</b><span id="stats" class="value"></span></div>
+      </div>
+      <div id="notice" class="notice"></div>
+      <h2 style="margin-top:18px">完整状态（便于核对）</h2>
+      <div id="raw" class="json"></div>
+    </section>
+
+    <section class="card">
+      <h2>最近变化</h2>
+      <ol id="log" class="log"></ol>
+    </section>
+  </div>
+
+  <section class="card" style="margin-top:16px">
+    <h2>自由操作</h2>
+    <div class="actions" id="freeActions"></div>
+  </section>
+
+  <section class="card" style="margin-top:16px">
+    <h2>引导场景</h2>
+    <div class="tabs" id="tabs"></div>
+    <div id="scenarios"></div>
+  </section>
+</main>
+
+<script>
+// 可迁移的纯逻辑模块：不引用 DOM。
+const FocusSessionMachine = (() => {
+  const empty = () => ({
+    now: 0,
+    nextUnit: 1,
+    nextQuestion: 1,
+    surface: "监听中",
+    latestEligible: null,
+    current: null,
+    queued: null,
+    rating: null,
+    stats: { admitted: 0, queued: 0, capacityDrops: 0, answered: 0, correct: 0, invalid: 0 },
+    notice: "课堂已开始，等待合格知识单元。",
+    log: ["会话开始：监听中。"]
+  });
+
+  const clone = state => structuredClone(state);
+  const note = (s, message) => { s.notice = message; s.log.unshift(`[${s.now}s] ${message}`); s.log = s.log.slice(0, 24); };
+  const makeQuestion = (s, trigger) => {
+    const unitId = s.latestEligible?.id;
+    return {
+      id: `Q${s.nextQuestion++}`,
+      unitId,
+      trigger,
+      recognizedAt: s.now,
+      queueExpiresAt: s.now + 120,
+      phase: "active",
+      shownAt: null,
+      deadline: null,
+      pendingExpiresAt: null,
+      extended: false
+    };
+  };
+  const show = (s, q, at = s.now) => {
+    q.phase = "active";
+    q.shownAt = at;
+    q.deadline = at + 8;
+    q.pendingExpiresAt = null;
+    s.current = q;
+    s.surface = `答题卡 ${q.id}`;
+    s.stats.admitted++;
+    note(s, `${q.id} 立即显示；8 秒内可作答或延长一次。`);
+  };
+  const promoteQueue = (s, at = s.now) => {
+    if (!s.queued) { s.surface = "监听中"; return; }
+    if (s.queued.queueExpiresAt <= at) {
+      note(s, `${s.queued.id} 在队列中已过期并被丢弃。`);
+      s.queued = null;
+      s.surface = "监听中";
+      return;
+    }
+    const q = s.queued;
+    s.queued = null;
+    show(s, q, at);
+  };
+  const admit = (s, q) => {
+    if (!s.current && s.surface !== "反馈中") { show(s, q); return; }
+    if (!s.queued) {
+      s.queued = q;
+      s.stats.queued++;
+      note(s, `${q.id} 被接纳为唯一排队题，两分钟后失效。`);
+      return;
+    }
+    s.stats.capacityDrops++;
+    note(s, `${q.id} 因当前槽和队列都已占用而丢弃。`);
+  };
+  const nextEventTime = (s, target) => {
+    const times = [];
+    if (s.current?.phase === "active") times.push(s.current.deadline);
+    if (["pending", "pending-open"].includes(s.current?.phase)) times.push(s.current.pendingExpiresAt);
+    if (s.current?.phase === "feedback") times.push(s.current.feedbackUntil);
+    if (s.queued) times.push(s.queued.queueExpiresAt);
+    const candidates = times.filter(t => t !== null && t > s.now && t <= target);
+    return candidates.length ? Math.min(...candidates) : null;
+  };
+  const processAt = s => {
+    if (s.queued && s.queued.queueExpiresAt <= s.now) {
+      note(s, `${s.queued.id} 在队列中两分钟未展示，已过期。`);
+      s.queued = null;
+    }
+    if (s.current?.phase === "active" && s.current.deadline <= s.now) {
+      s.current.phase = "pending";
+      s.current.pendingExpiresAt = s.now + 120;
+      s.surface = `待答徽标 ${s.current.id}`;
+      note(s, `${s.current.id} 超过答题窗口，折叠为待答徽标并阻塞队列。`);
+    }
+    if (["pending", "pending-open"].includes(s.current?.phase) && s.current.pendingExpiresAt <= s.now) {
+      const id = s.current.id;
+      s.current = null;
+      note(s, `${id} 待答两分钟后过期。`);
+      promoteQueue(s);
+    }
+    if (s.current?.phase === "feedback" && s.current.feedbackUntil <= s.now) {
+      const id = s.current.id;
+      s.current = null;
+      note(s, `${id} 的三秒反馈结束。`);
+      promoteQueue(s);
+    }
+  };
+  const advance = (s, seconds) => {
+    const target = s.now + seconds;
+    while (true) {
+      const next = nextEventTime(s, target);
+      if (next === null) break;
+      s.now = next;
+      processAt(s);
+    }
+    s.now = target;
+    processAt(s);
+    note(s, `时间推进 ${seconds} 秒。`);
+  };
+
+  function reduce(state, action) {
+    const s = clone(state);
+    if (["rating", "completed"].includes(s.surface) && !["RATE", "RESET"].includes(action.type)) {
+      note(s, "会话已停止，不再接受课堂操作。" );
+      return s;
+    }
+    switch (action.type) {
+      case "RESET": return empty();
+      case "ELIGIBLE": {
+        const unit = { id: `U${s.nextUnit++}`, recognizedAt: s.now, topic: action.topic || "相遇问题关系" };
+        s.latestEligible = unit;
+        note(s, `${unit.id} 成为合格知识单元（只表示内容质量）。`);
+        admit(s, makeQuestion(s, "自动"));
+        return s;
+      }
+      case "MANUAL":
+        if (!s.latestEligible) { note(s, "手动触发被拒绝：暂时没有合格知识单元。" ); return s; }
+        admit(s, makeQuestion(s, "手动"));
+        return s;
+      case "EXTEND":
+        if (s.current?.phase !== "active") { note(s, "延长被拒绝：当前没有活动答题卡。" ); return s; }
+        if (s.current.extended) { note(s, "延长被拒绝：每题只能延长一次。" ); return s; }
+        s.current.extended = true;
+        s.current.deadline = s.current.shownAt + 20;
+        note(s, `${s.current.id} 延长 12 秒，总活动窗口为 20 秒。`);
+        return s;
+      case "ANSWER":
+        if (!s.current || !["active", "pending-open", "pending"].includes(s.current.phase)) { note(s, "作答被拒绝：没有可回答的当前题。" ); return s; }
+        s.stats.answered++;
+        if (action.correct) s.stats.correct++;
+        s.current.phase = "feedback";
+        s.current.feedbackUntil = s.now + 3;
+        s.surface = "反馈中";
+        note(s, `${s.current.id} 已${action.correct ? "答对" : "答错"}；显示课堂依据 3 秒。`);
+        return s;
+      case "OPEN_PENDING":
+        if (s.current?.phase !== "pending") { note(s, "打开被拒绝：当前没有待答徽标。" ); return s; }
+        s.current.phase = "pending-open";
+        s.surface = `待答题 ${s.current.id}`;
+        note(s, `${s.current.id} 已重新打开；原两分钟失效时间不重置。`);
+        return s;
+      case "COLLAPSE":
+        if (s.current?.phase !== "pending-open") { note(s, "折叠被拒绝：当前不是重新打开的待答题。" ); return s; }
+        s.current.phase = "pending";
+        s.surface = `待答徽标 ${s.current.id}`;
+        note(s, `${s.current.id} 再次折叠；失效时间保持不变。`);
+        return s;
+      case "REPORT_WRONG":
+        if (!s.current || !["active", "pending", "pending-open"].includes(s.current.phase)) { note(s, "报告被拒绝：当前没有可报告的题目。" ); return s; }
+        s.stats.invalid++;
+        note(s, `${s.current.id} 标记为题目有误，不重新生成。`);
+        s.current = null;
+        promoteQueue(s);
+        return s;
+      case "ADVANCE": advance(s, action.seconds); return s;
+      case "END":
+        s.current = null; s.queued = null; s.surface = "rating";
+        note(s, "收音停止，等待五级注意力复位评价。" ); return s;
+      case "RATE":
+        if (s.surface !== "rating") { note(s, "评价被拒绝：会话尚未结束。" ); return s; }
+        s.rating = action.value; s.surface = "completed";
+        note(s, `已记录 ${action.value}/5 的注意力复位评价，会话完成。`); return s;
+      default: note(s, `未知操作：${action.type}`); return s;
+    }
+  }
+  return { initial: empty, reduce };
+})();
+
+let state = FocusSessionMachine.initial();
+const actions = [
+  ["识别新的合格知识单元", {type:"ELIGIBLE"}, "primary"],
+  ["手动触发", {type:"MANUAL"}],
+  ["答对", {type:"ANSWER", correct:true}],
+  ["答错", {type:"ANSWER", correct:false}],
+  ["再想 12 秒", {type:"EXTEND"}],
+  ["打开待答题", {type:"OPEN_PENDING"}],
+  ["再次折叠", {type:"COLLAPSE"}],
+  ["题目有误", {type:"REPORT_WRONG"}, "danger"],
+  ["推进 3 秒", {type:"ADVANCE", seconds:3}],
+  ["推进 8 秒", {type:"ADVANCE", seconds:8}],
+  ["推进 12 秒", {type:"ADVANCE", seconds:12}],
+  ["推进 120 秒", {type:"ADVANCE", seconds:120}],
+  ["结束课堂", {type:"END"}],
+  ["评价 4/5", {type:"RATE", value:4}],
+  ["重置", {type:"RESET"}, "danger"]
+];
+
+const scenarios = [
+  { name:"顺畅完成", desc:"自动题显示后延长一次、作答、查看三秒反馈。观察时间窗口是否直观。", steps:[
+    ["出现知识单元",{type:"ELIGIBLE"}], ["延长一次",{type:"EXTEND"}], ["推进 12 秒",{type:"ADVANCE",seconds:12}], ["答对",{type:"ANSWER",correct:true}], ["结束反馈",{type:"ADVANCE",seconds:3}]
+  ]},
+  { name:"待答阻塞队列", desc:"第二题进入队列，第一题超时成为待答；第三题应被容量规则丢弃。", steps:[
+    ["第一单元",{type:"ELIGIBLE"}], ["第二单元",{type:"ELIGIBLE"}], ["第一题超时",{type:"ADVANCE",seconds:8}], ["第三单元",{type:"ELIGIBLE"}], ["打开待答",{type:"OPEN_PENDING"}], ["回答待答",{type:"ANSWER",correct:false}], ["反馈后自动下一题",{type:"ADVANCE",seconds:3}]
+  ]},
+  { name:"两分钟失效", desc:"当前题变待答、第二题排队；时间推进后两者都应失效而不是形成积压。", steps:[
+    ["第一单元",{type:"ELIGIBLE"}], ["第二单元",{type:"ELIGIBLE"}], ["第一题超时",{type:"ADVANCE",seconds:8}], ["推进两分钟",{type:"ADVANCE",seconds:120}]
+  ]},
+  { name:"非法操作", desc:"没有题时回答、重复延长、错误阶段评价都必须被明确拒绝且不破坏状态。", steps:[
+    ["空状态作答",{type:"ANSWER",correct:true}], ["出现单元",{type:"ELIGIBLE"}], ["第一次延长",{type:"EXTEND"}], ["第二次延长",{type:"EXTEND"}], ["提前评价",{type:"RATE",value:5}]
+  ]}
+];
+
+function dispatch(action){ state = FocusSessionMachine.reduce(state, action); render(); }
+function describeQuestion(q){
+  if(!q) return "无";
+  const expiry = q.phase === "active" ? `截止 ${q.deadline}s` : q.pendingExpiresAt ? `待答失效 ${q.pendingExpiresAt}s` : q.phase;
+  return `${q.id} · ${q.trigger} · ${q.phase} · ${expiry}`;
+}
+function render(){
+  document.querySelector("#now").textContent = `${state.now} 秒`;
+  document.querySelector("#surface").textContent = state.surface;
+  document.querySelector("#eligible").textContent = state.latestEligible ? `${state.latestEligible.id} · ${state.latestEligible.topic}` : "无";
+  document.querySelector("#current").textContent = describeQuestion(state.current);
+  document.querySelector("#queued").textContent = state.queued ? `${state.queued.id} · ${state.queued.trigger} · 失效 ${state.queued.queueExpiresAt}s` : "无";
+  document.querySelector("#stats").textContent = `显示 ${state.stats.admitted} / 排队 ${state.stats.queued} / 容量丢弃 ${state.stats.capacityDrops} / 作答 ${state.stats.answered} / 正确 ${state.stats.correct}`;
+  document.querySelector("#notice").textContent = state.notice;
+  document.querySelector("#raw").textContent = JSON.stringify(state,null,2);
+  document.querySelector("#log").innerHTML = state.log.map(item=>`<li>${escapeHtml(item)}</li>`).join("");
+}
+function escapeHtml(value){ return value.replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+
+const free = document.querySelector("#freeActions");
+actions.forEach(([label,action,kind])=>{ const b=document.createElement("button"); b.textContent=label; if(kind)b.className=kind; b.onclick=()=>dispatch(action); free.appendChild(b); });
+
+const tabs=document.querySelector("#tabs"), scenarioHost=document.querySelector("#scenarios");
+scenarios.forEach((scenario,index)=>{
+  const tab=document.createElement("button"); tab.className=`tab ${index===0?"active":""}`; tab.textContent=scenario.name;
+  tab.onclick=()=>activateScenario(index); tabs.appendChild(tab);
+  const panel=document.createElement("div"); panel.className=`scenario ${index===0?"active":""}`; panel.dataset.index=index;
+  panel.innerHTML=`<p>${scenario.desc}</p><div class="steps"></div>`;
+  const steps=panel.querySelector(".steps");
+  scenario.steps.forEach(([label,action])=>{ const b=document.createElement("button"); b.textContent=label; b.onclick=()=>{dispatch(action);b.classList.add("done")}; steps.appendChild(b); });
+  scenarioHost.appendChild(panel);
+});
+function activateScenario(index){
+  state=FocusSessionMachine.initial();
+  document.querySelectorAll(".tab").forEach((el,i)=>el.classList.toggle("active",i===index));
+  document.querySelectorAll(".scenario").forEach((el,i)=>el.classList.toggle("active",i===index));
+  document.querySelectorAll(`.scenario[data-index="${index}"] .steps button`).forEach(b=>b.classList.remove("done"));
+  render();
+}
+render();
+</script>
+</body>
+</html>

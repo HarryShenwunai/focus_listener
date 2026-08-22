@@ -1,0 +1,6 @@
+<Project>
+  <ItemGroup>
+    <Compile Remove="WindowsClassroomAudioAdapter.cs" />
+    <Compile Remove="WindowsDiagnosticAudioSource.cs" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <PackageReference Include="Google.GenAI" />
+    <PackageReference Include="Microsoft.Data.Sqlite" />
+    <PackageReference Include="NAudio" />
+  </ItemGroup>
+</Project>
