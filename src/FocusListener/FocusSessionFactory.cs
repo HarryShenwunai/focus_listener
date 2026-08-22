@@ -6,7 +6,7 @@ public static class FocusSessionFactory
     {
         var clock = new SystemSessionClock();
         return new FocusSession(
-            new ScriptedCandidateAdapter(clock),
+            new GenericScriptedCandidateAdapter(clock),
             new SqliteSessionJournalAdapter(databasePath),
             clock);
     }

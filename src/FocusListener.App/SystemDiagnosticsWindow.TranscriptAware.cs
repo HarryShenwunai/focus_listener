@@ -134,7 +134,7 @@ internal sealed class SystemDiagnosticsWindow : Window
     {
         var text = new TextBlock
         {
-            Text = "点击开始后，请在 10 秒音频检测期间清晰朗读一两句小学行程问题知识点。\n测试题只会根据本次实时转写生成；没有合格转写时不会用固定素材代替。\n要测试系统声音，请同时让电脑播放相关的有声内容。",
+            Text = "点击开始后，请在 10 秒音频检测期间清晰朗读一两句包含完整知识关系的课堂内容。\n测试题只会根据本次实时转写和正式课堂规则生成；没有合格转写时会显示具体原因，不会用固定素材代替。\n要测试系统声音，请同时让电脑播放相关的有声内容。",
             TextWrapping = TextWrapping.Wrap,
             LineHeight = 22,
             Foreground = InformationTextBrush,

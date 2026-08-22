@@ -1,5 +1,3 @@
-using System.Runtime.CompilerServices;
-
 namespace FocusListener;
 
 internal sealed record ResetQuestionCandidate(
@@ -8,7 +6,13 @@ internal sealed record ResetQuestionCandidate(
     RestatementQuestion Question,
     ChoiceId CorrectChoice,
     LessonEvidence Evidence,
-    TriggerKind Trigger);
+    TriggerKind Trigger)
+{
+    public string Subject { get; init; } = "其他";
+    public string Language { get; init; } = "und";
+    public string KnowledgeFingerprint { get; init; } = EligibleUnitId;
+    public double QualityScore { get; init; } = 0.5;
+}
 
 internal interface IQuestionCandidateSource
 {
@@ -19,6 +23,16 @@ internal interface IQuestionCandidateSource
     ValueTask<ResetQuestionCandidate?> RequestManualAsync(
         SessionStart start,
         CancellationToken cancellation);
+}
+
+internal sealed record QuestionSourceStatus(
+    SessionHealth Health,
+    string Notice,
+    string Code);
+
+internal interface IQuestionCandidateSourceStatus
+{
+    IAsyncEnumerable<QuestionSourceStatus> StatusAsync(CancellationToken cancellation);
 }
 
 internal interface ISessionClock
@@ -60,13 +74,26 @@ internal sealed record SessionTiming(
     TimeSpan FeedbackDuration,
     TimeSpan TickInterval)
 {
+    public TimeSpan Warmup { get; init; } = TimeSpan.Zero;
+    public TimeSpan AutoCooldown { get; init; } = TimeSpan.Zero;
+    public TimeSpan CandidateLifetime { get; init; } = TimeSpan.FromMinutes(2);
+    public TimeSpan ManualSafetyGap { get; init; } = TimeSpan.Zero;
+    public int CandidateCapacity { get; init; } = 1;
+
     public static SessionTiming Default { get; } = new(
         TimeSpan.FromSeconds(8),
         TimeSpan.FromSeconds(20),
         TimeSpan.FromMinutes(2),
-        TimeSpan.FromMinutes(2),
+        TimeSpan.FromMinutes(3),
         TimeSpan.FromSeconds(3),
-        TimeSpan.FromMilliseconds(100));
+        TimeSpan.FromMilliseconds(100))
+    {
+        Warmup = TimeSpan.FromSeconds(60),
+        AutoCooldown = TimeSpan.FromSeconds(120),
+        CandidateLifetime = TimeSpan.FromSeconds(180),
+        ManualSafetyGap = TimeSpan.FromSeconds(30),
+        CandidateCapacity = 3
+    };
 }
 
 internal sealed class InMemorySessionJournalAdapter : ISessionJournal

@@ -38,7 +38,26 @@ public enum TriggerKind
 public enum QuestionType
 {
     RelationshipRecognition,
-    TermDefinition
+    TermDefinition,
+    Causality,
+    RuleOrCondition,
+    ProcessOrSequence,
+    ComparisonOrDistinction,
+    ClassificationOrExample
+}
+
+public static class QuestionTypeDisplay
+{
+    public static string Chinese(QuestionType type) => type switch
+    {
+        QuestionType.TermDefinition => "定义",
+        QuestionType.Causality => "因果",
+        QuestionType.RuleOrCondition => "规则 / 条件",
+        QuestionType.ProcessOrSequence => "过程 / 顺序",
+        QuestionType.ComparisonOrDistinction => "比较 / 区分",
+        QuestionType.ClassificationOrExample => "分类 / 举例",
+        _ => "关系识别"
+    };
 }
 
 public enum SessionSurfaceKind
@@ -71,7 +90,11 @@ public sealed record RestatementQuestion(
     QuestionId Id,
     QuestionType Type,
     string Stem,
-    IReadOnlyList<QuestionChoice> Choices);
+    IReadOnlyList<QuestionChoice> Choices)
+{
+    public string Subject { get; init; } = "其他";
+    public string Language { get; init; } = "und";
+}
 
 public sealed record LessonEvidence(
     string Excerpt,
@@ -82,7 +105,11 @@ public sealed record QuestionCardView(
     QuestionType Type,
     string Stem,
     IReadOnlyList<QuestionChoice> Choices,
-    TriggerKind Trigger);
+    TriggerKind Trigger)
+{
+    public string Subject { get; init; } = "其他";
+    public string Language { get; init; } = "und";
+}
 
 public sealed record AnswerFeedback(
     bool IsCorrect,
@@ -99,7 +126,10 @@ public sealed record SessionView(
     DateTimeOffset? Deadline,
     DateTimeOffset? PendingExpiresAt,
     bool CanExtend,
-    string? Notice);
+    string? Notice)
+{
+    public bool CandidateReady { get; init; }
+}
 
 public sealed record SessionSummary(
     SessionId SessionId,

@@ -12,6 +12,9 @@ internal static class JsonSerializer
     public static string Serialize<T>(T value) =>
         System.Text.Json.JsonSerializer.Serialize(value);
 
+    public static string Serialize<T>(T value, JsonSerializerOptions options) =>
+        System.Text.Json.JsonSerializer.Serialize(value, options);
+
     public static string Serialize(object? value, Type inputType) =>
         System.Text.Json.JsonSerializer.Serialize(value, inputType);
 }

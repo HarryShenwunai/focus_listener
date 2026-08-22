@@ -15,11 +15,28 @@ public static class TranscriptAwareFocusDiagnosticsFactory
     }
 }
 
+internal sealed record DiagnosticQuestionGeneration(
+    DiagnosticQuestionPreview? Question,
+    string Detail)
+{
+    public bool Accepted => Question is not null;
+}
+
 internal interface IDiagnosticQuestionGenerator
 {
     ValueTask<DiagnosticQuestionPreview?> TryGenerateAsync(
         TranscriptUnit input,
         CancellationToken cancellation);
+
+    async ValueTask<DiagnosticQuestionGeneration> GenerateAsync(
+        TranscriptUnit input,
+        CancellationToken cancellation)
+    {
+        var question = await TryGenerateAsync(input, cancellation);
+        return new DiagnosticQuestionGeneration(
+            question,
+            question is null ? "这段转写没有通过通用知识点规则" : "证据校验通过");
+    }
 }
 
 internal sealed class GeminiDiagnosticQuestionGenerator(GeminiFocusOptions options)
@@ -27,23 +44,36 @@ internal sealed class GeminiDiagnosticQuestionGenerator(GeminiFocusOptions optio
 {
     public async ValueTask<DiagnosticQuestionPreview?> TryGenerateAsync(
         TranscriptUnit input,
+        CancellationToken cancellation) =>
+        (await GenerateAsync(input, cancellation)).Question;
+
+    public async ValueTask<DiagnosticQuestionGeneration> GenerateAsync(
+        TranscriptUnit input,
         CancellationToken cancellation)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
         timeout.CancelAfter(TimeSpan.FromSeconds(20));
         using var generator = new GeminiRestatementQuestionGenerator(options);
-        var candidate = await generator.TryGenerateAsync(
+        var evaluation = await generator.EvaluateAsync(
             input,
+            Array.Empty<string>(),
             TriggerKind.Automatic,
             timeout.Token);
-        return candidate is null
-            ? null
-            : new DiagnosticQuestionPreview(
+        if (evaluation.Candidate is not { } candidate)
+        {
+            return new DiagnosticQuestionGeneration(
+                null,
+                evaluation.RejectionReason ?? "这段转写没有通过通用知识点规则");
+        }
+
+        return new DiagnosticQuestionGeneration(
+            new DiagnosticQuestionPreview(
                 candidate.Question.Stem,
                 candidate.Question.Choices
                     .Select(choice => $"{choice.Id.Value}  {choice.Text}")
                     .ToArray(),
-                candidate.Evidence.Excerpt);
+                candidate.Evidence.Excerpt),
+            $"{candidate.Subject} · {QuestionTypeDisplay.Chinese(candidate.Question.Type)} · 证据校验通过");
     }
 }
 
@@ -75,7 +105,7 @@ internal sealed class TranscriptAwareFocusDiagnostics(
         var working = ReplaceQuestionItem(
             source,
             FocusDiagnosticState.Running,
-            "正在严格根据本次实时转写生成题目",
+            "正在用正式课堂规则分析本次实时转写",
             null,
             true,
             "正在根据本次实时转写生成题目…");
@@ -99,20 +129,20 @@ internal sealed class TranscriptAwareFocusDiagnostics(
         {
             try
             {
-                var question = await questionGenerator!.TryGenerateAsync(input, cancellation);
-                final = question is null
+                var generation = await questionGenerator!.GenerateAsync(input, cancellation);
+                final = !generation.Accepted
                     ? ReplaceQuestionItem(
                         working,
                         FocusDiagnosticState.Warning,
-                        "本次转写不包含可独立复述的小学行程知识点，因此没有生成题目",
+                        $"本次转写未生成题目：{generation.Detail}",
                         null,
                         false,
                         "检测完成：存在提醒")
                     : ReplaceQuestionItem(
                         working,
                         FocusDiagnosticState.Passed,
-                        "已严格根据本次实时转写生成，并通过逐字证据校验",
-                        question,
+                        $"已严格根据本次实时转写生成 · {generation.Detail}",
+                        generation.Question,
                         false,
                         FinalHeadline(working.Items, FocusDiagnosticState.Passed));
             }
@@ -166,7 +196,7 @@ internal sealed class TranscriptAwareFocusDiagnostics(
                 ? item with
                 {
                     State = FocusDiagnosticState.Running,
-                    Detail = "等待使用本次实时转写生成题目",
+                    Detail = "等待使用本次实时转写和正式规则生成题目",
                     Preview = null,
                     UpdatedAt = DateTimeOffset.UtcNow
                 }

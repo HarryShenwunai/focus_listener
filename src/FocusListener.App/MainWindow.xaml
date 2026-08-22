@@ -43,7 +43,7 @@
                     <StackPanel>
                         <TextBlock Text="FOCUS LISTENER" FontSize="12" FontWeight="Bold"
                                    Foreground="{StaticResource AccentBrush}" CharacterSpacing="90" />
-                        <TextBlock x:Name="ModeLabel" Text="模拟课堂 · 小学行程问题" FontSize="11"
+                        <TextBlock x:Name="ModeLabel" Text="模拟课堂 · 通用知识点" FontSize="11"
                                    Foreground="{StaticResource MutedBrush}" Margin="0,2,0,0" />
                     </StackPanel>
                 </StackPanel>

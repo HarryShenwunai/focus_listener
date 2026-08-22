@@ -12,7 +12,7 @@
         ResizeMode="NoResize"
         Topmost="True"
         ShowInTaskbar="True"
-        Loaded="Window_Loaded"
+        Loaded="Window_LoadedV2"
         SourceInitialized="Window_SourceInitialized"
         Closing="Window_Closing">
     <Border Margin="12"
@@ -43,7 +43,7 @@
                     <StackPanel>
                         <TextBlock Text="FOCUS LISTENER" FontSize="12" FontWeight="Bold"
                                    Foreground="{StaticResource AccentBrush}" />
-                        <TextBlock x:Name="ModeLabel" Text="模拟课堂 · 小学行程问题" FontSize="11"
+                        <TextBlock x:Name="ModeLabel" Text="通用知识点模式" FontSize="11"
                                    Foreground="{StaticResource MutedBrush}" Margin="0,2,0,0" />
                     </StackPanel>
                 </StackPanel>
@@ -60,16 +60,26 @@
                                TextWrapping="Wrap" />
                     <TextBlock Margin="0,10,0,18" TextWrapping="Wrap" LineHeight="22"
                                Foreground="{StaticResource MutedBrush}"
-                               Text="先用内置课堂脚本验证完整流程。自动题只复述知识点，不要求计算；Ctrl + Shift + Q 可手动触发。" />
-                    <Button Content="开始 12 分钟模拟课堂" Click="StartSession_Click"
+                               Text="数学、科学、历史、语言和其他知识点都能触发。只问三选一复述题，不要求计算；Ctrl + Shift + Q 可手动触发。" />
+                    <Button x:Name="StartSessionButtonV2" Content="开始 12 分钟模拟课堂" Click="StartSessionV2_Click"
                             Background="{StaticResource AccentBrush}" Foreground="White" FontWeight="SemiBold" />
+                    <Button Content="课堂提问设置" Click="Settings_Click" Margin="0,10,0,0"
+                            Background="Transparent" Foreground="{StaticResource AccentBrush}" />
                 </StackPanel>
 
                 <StackPanel x:Name="ListeningPanel" Visibility="Collapsed">
                     <TextBlock Text="正在听课" FontSize="25" FontWeight="SemiBold"
                                Foreground="{StaticResource InkBrush}" />
-                    <TextBlock x:Name="ListeningNotice" Margin="0,8,0,16" TextWrapping="Wrap"
-                               Foreground="{StaticResource MutedBrush}" Text="等待出现合适的知识单元…" />
+                    <TextBlock x:Name="ListeningNotice" Margin="0,8,0,13" TextWrapping="Wrap"
+                               Foreground="{StaticResource MutedBrush}" Text="等待出现完整、可复述的知识点…" />
+                    <Button x:Name="CandidateReadyButton" Click="CandidateReady_Click" Visibility="Collapsed"
+                            Margin="0,0,0,9" Padding="12,7" HorizontalAlignment="Left"
+                            Background="#E4F3EB" Foreground="#1D6B4B" ToolTip="点击立即使用最新知识点出题">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="●" FontSize="9" Margin="0,0,7,0" VerticalAlignment="Center" />
+                            <TextBlock Text="题目已准备" FontWeight="SemiBold" />
+                        </StackPanel>
+                    </Button>
                     <Button Content="现在问我一道" Click="ManualTrigger_Click"
                             Background="{StaticResource AccentSoftBrush}" Foreground="{StaticResource AccentBrush}" />
                 </StackPanel>
@@ -79,8 +89,12 @@
                         <Border DockPanel.Dock="Right" Background="#FFF1CD" CornerRadius="9" Padding="9,4">
                             <TextBlock x:Name="CountdownText" Text="8 秒" Foreground="#7A5716" FontWeight="SemiBold" />
                         </Border>
-                        <TextBlock x:Name="TriggerLabel" Text="自动复位题" Foreground="{StaticResource AccentBrush}"
-                                   FontSize="12" FontWeight="Bold" VerticalAlignment="Center" />
+                        <StackPanel>
+                            <TextBlock x:Name="TriggerLabel" Text="自动复位题" Foreground="{StaticResource AccentBrush}"
+                                       FontSize="12" FontWeight="Bold" />
+                            <TextBlock x:Name="KnowledgeLabel" Text="其他 · 关系识别" Margin="0,2,0,0"
+                                       Foreground="{StaticResource MutedBrush}" FontSize="11" />
+                        </StackPanel>
                     </DockPanel>
                     <TextBlock x:Name="QuestionStem" Margin="0,12,0,13" TextWrapping="Wrap"
                                FontSize="21" FontWeight="SemiBold" LineHeight="30"
@@ -123,7 +137,7 @@
                         <TextBlock x:Name="EvidenceText" TextWrapping="Wrap" LineHeight="23"
                                    Foreground="{StaticResource InkBrush}" />
                     </Border>
-                    <TextBlock Text="3 秒后继续监听" Margin="0,10,0,0" HorizontalAlignment="Right"
+                    <TextBlock x:Name="FeedbackDurationText" Text="3 秒后继续监听" Margin="0,10,0,0" HorizontalAlignment="Right"
                                Foreground="{StaticResource MutedBrush}" FontSize="12" />
                 </StackPanel>
 
@@ -169,5 +183,3 @@
         </Grid>
     </Border>
 </Window>
-
-

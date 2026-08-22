@@ -112,7 +112,7 @@ public partial class MainWindow : Window
             : FocusSessionFactory.CreateSimulation(_databasePath);
         ModeLabel.Text = live
             ? "真实课堂 · Gemini Live + Flash-Lite"
-            : "模拟课堂 · 小学行程问题";
+            : "模拟课堂 · 通用知识点";
         var progress = new Progress<SessionView>(Render);
         _sessionTask = _session.RunAsync(
             new SessionStart(live ? ClassroomKind.InPerson : ClassroomKind.ComputerPlayback, TimeSpan.FromMinutes(12)),
