@@ -11,7 +11,7 @@ internal sealed class ApiKeyDialog : Window
 
     public ApiKeyDialog(string? currentApiKey)
     {
-        Title = "配置 Gemini API Key";
+        Title = T("配置 Gemini API Key", "Configure Gemini API key");
         Width = 430;
         SizeToContent = SizeToContent.Height;
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
@@ -29,7 +29,7 @@ internal sealed class ApiKeyDialog : Window
 
         var title = new TextBlock
         {
-            Text = "连接 Gemini 免费层",
+            Text = T("连接 Gemini 免费层", "Connect Gemini"),
             FontSize = 21,
             FontWeight = FontWeights.SemiBold,
             Foreground = new SolidColorBrush(Color.FromRgb(23, 33, 27))
@@ -38,7 +38,7 @@ internal sealed class ApiKeyDialog : Window
 
         var help = new TextBlock
         {
-            Text = "密钥只保存到当前 Windows 用户的凭据管理器，不写入项目或 SQLite。",
+            Text = T("密钥验证成功后只保存到当前 Windows 用户的凭据管理器，不写入项目或 SQLite。", "After validation, the key is stored only in Windows Credential Manager, never in the project or SQLite."),
             TextWrapping = TextWrapping.Wrap,
             Foreground = new SolidColorBrush(Color.FromRgb(102, 115, 107)),
             Margin = new Thickness(0, 8, 0, 14)
@@ -62,17 +62,17 @@ internal sealed class ApiKeyDialog : Window
             HorizontalAlignment = HorizontalAlignment.Right,
             Margin = new Thickness(0, 18, 0, 0)
         };
-        var clear = new Button { Content = "清除密钥", Margin = new Thickness(0, 0, 8, 0) };
+        var clear = new Button { Content = T("清除密钥", "Clear key"), Margin = new Thickness(0, 0, 8, 0) };
         clear.Click += (_, _) =>
         {
             ClearRequested = true;
             DialogResult = true;
         };
-        var cancel = new Button { Content = "取消", Margin = new Thickness(0, 0, 8, 0) };
+        var cancel = new Button { Content = T("取消", "Cancel"), Margin = new Thickness(0, 0, 8, 0) };
         cancel.Click += (_, _) => DialogResult = false;
         var save = new Button
         {
-            Content = "保存并使用",
+            Content = T("保存并使用", "Validate and use"),
             Background = new SolidColorBrush(Color.FromRgb(35, 122, 87)),
             Foreground = Brushes.White
         };
@@ -94,12 +94,14 @@ internal sealed class ApiKeyDialog : Window
     public string? ApiKey { get; private set; }
     public bool ClearRequested { get; private set; }
 
+    private static string T(string zh, string en) => ProductText.Choose(zh, en);
+
     private void Save()
     {
         var value = _apiKey.Password.Trim();
         if (value.Length < 10)
         {
-            _validation.Text = "请输入有效的 Gemini API Key。";
+            _validation.Text = T("请输入有效的 Gemini API Key。", "Enter a valid Gemini API key.");
             return;
         }
 

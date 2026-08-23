@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Threading.Channels;
 using NAudio.Wave;
@@ -22,26 +23,41 @@ internal interface IClassroomAudioSource
     IAsyncEnumerable<PcmAudioFrame> CaptureAsync(CancellationToken cancellation);
 }
 
-internal sealed class WindowsClassroomAudioAdapter : IClassroomAudioSource
+internal sealed class WindowsClassroomAudioAdapter(
+    AudioCaptureConfiguration configuration,
+    ClassroomExperienceControl? experience = null) : IClassroomAudioSource
 {
-    private const int SampleRate = 16_000;
     private const int BufferMilliseconds = 100;
     private const double SystemActivityThreshold = 0.006;
-    private static readonly long BucketTicks = TimeSpan.FromMilliseconds(BufferMilliseconds).Ticks;
+    private static readonly long BucketStopwatchTicks = Math.Max(
+        1,
+        Stopwatch.Frequency * BufferMilliseconds / 1_000);
 
     public async IAsyncEnumerable<PcmAudioFrame> CaptureAsync(
         [EnumeratorCancellation] CancellationToken cancellation)
     {
         var faults = new ConcurrentQueue<Exception>();
-        WasapiRecorder? microphone = TryBuildRecorder(loopback: false, faults);
-        WasapiRecorder? playback = TryBuildRecorder(loopback: true, faults);
+        var microphone = configuration.Captures(ClassroomAudioRoute.Microphone)
+            ? WindowsAudioRecorderFactory.TryCreate(
+                ClassroomAudioRoute.Microphone,
+                configuration.MicrophoneDeviceId,
+                faults)
+            : null;
+        var playback = configuration.Captures(ClassroomAudioRoute.SystemPlayback)
+            ? WindowsAudioRecorderFactory.TryCreate(
+                ClassroomAudioRoute.SystemPlayback,
+                configuration.SystemPlaybackDeviceId,
+                faults)
+            : null;
         if (microphone is null && playback is null)
         {
-            throw new AggregateException("No Windows audio capture endpoint could be opened.", faults);
+            throw new AggregateException(
+                $"无法打开所选音频设备：{configuration.MicrophoneDeviceName} / {configuration.SystemPlaybackDeviceName}",
+                faults);
         }
 
         using var captureLifetime = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
-        var frames = Channel.CreateBounded<PcmAudioFrame>(new BoundedChannelOptions(64)
+        var frames = Channel.CreateBounded<PcmAudioFrame>(new BoundedChannelOptions(128)
         {
             SingleReader = true,
             SingleWriter = false,
@@ -51,16 +67,26 @@ internal sealed class WindowsClassroomAudioAdapter : IClassroomAudioSource
         var pumps = new List<Task>(2);
         if (microphone is not null)
         {
-            pumps.Add(PumpAsync(microphone, ClassroomAudioRoute.Microphone, frames.Writer, faults, captureLifetime.Token));
+            pumps.Add(PumpAsync(
+                microphone.Recorder,
+                ClassroomAudioRoute.Microphone,
+                frames.Writer,
+                faults,
+                captureLifetime.Token));
         }
 
         if (playback is not null)
         {
-            pumps.Add(PumpAsync(playback, ClassroomAudioRoute.SystemPlayback, frames.Writer, faults, captureLifetime.Token));
+            pumps.Add(PumpAsync(
+                playback.Recorder,
+                ClassroomAudioRoute.SystemPlayback,
+                frames.Writer,
+                faults,
+                captureLifetime.Token));
         }
 
         var completion = CompleteChannelAsync(pumps, frames.Writer, faults, captureLifetime.Token);
-        var buckets = new SortedDictionary<long, AudioBucket>();
+        var buckets = new SortedDictionary<long, AudioArbitrationBucket>();
         long latestBucket = long.MinValue;
 
         try
@@ -70,19 +96,21 @@ internal sealed class WindowsClassroomAudioAdapter : IClassroomAudioSource
                 latestBucket = Math.Max(latestBucket, frame.TimeBucket);
                 if (!buckets.TryGetValue(frame.TimeBucket, out var bucket))
                 {
-                    bucket = new AudioBucket();
+                    bucket = new AudioArbitrationBucket(SystemActivityThreshold);
                     buckets.Add(frame.TimeBucket, bucket);
                 }
 
                 bucket.Add(frame);
-                foreach (var ready in DrainReady(buckets, latestBucket - 2))
+                foreach (var ready in DrainReady(buckets, latestBucket - 2, configuration.Mode))
                 {
+                    ReportActivity(ready);
                     yield return ready;
                 }
             }
 
-            foreach (var ready in DrainReady(buckets, long.MaxValue))
+            foreach (var ready in DrainReady(buckets, long.MaxValue, configuration.Mode))
             {
+                ReportActivity(ready);
                 yield return ready;
             }
 
@@ -104,32 +132,21 @@ internal sealed class WindowsClassroomAudioAdapter : IClassroomAudioSource
         }
     }
 
-    private static WasapiRecorder? TryBuildRecorder(bool loopback, ConcurrentQueue<Exception> faults)
+    private void ReportActivity(PcmAudioFrame frame)
     {
-        try
+        if (experience is null)
         {
-            var builder = new WasapiRecorderBuilder()
-                .WithSharedMode()
-                .WithEventSync()
-                .WithBufferLength(BufferMilliseconds)
-                .WithFormat(new WaveFormat(SampleRate, 16, 1))
-                .WithMmcssThreadPriority("Capture");
-            if (loopback)
-            {
-                builder.WithLoopbackCapture();
-            }
-            else
-            {
-                builder.WithCommunicationsMode();
-            }
+            return;
+        }
 
-            return builder.Build();
-        }
-        catch (Exception exception)
-        {
-            faults.Enqueue(exception);
-            return null;
-        }
+        var source = frame.Route == ClassroomAudioRoute.SystemPlayback
+            ? $"系统声音 · {configuration.SystemPlaybackDeviceName}"
+            : $"麦克风 · {configuration.MicrophoneDeviceName}";
+        experience.ReportAudio(new ClassroomAudioActivity(
+            source,
+            ToMeter(frame.RootMeanSquare),
+            configuration.Mode,
+            DateTimeOffset.UtcNow));
     }
 
     private static async Task PumpAsync(
@@ -149,11 +166,8 @@ internal sealed class WindowsClassroomAudioAdapter : IClassroomAudioSource
                     continue;
                 }
 
-                var qpcTicks = buffer.QPCPosition > 0
-                    ? buffer.QPCPosition
-                    : DateTimeOffset.UtcNow.Ticks;
                 output.TryWrite(new PcmAudioFrame(
-                    qpcTicks / BucketTicks,
+                    Stopwatch.GetTimestamp() / BucketStopwatchTicks,
                     route,
                     pcm,
                     CalculateRootMeanSquare(pcm)));
@@ -186,17 +200,16 @@ internal sealed class WindowsClassroomAudioAdapter : IClassroomAudioSource
     }
 
     private static IEnumerable<PcmAudioFrame> DrainReady(
-        SortedDictionary<long, AudioBucket> buckets,
-        long inclusiveMaximum)
+        SortedDictionary<long, AudioArbitrationBucket> buckets,
+        long inclusiveMaximum,
+        AudioCaptureMode mode)
     {
         var keys = buckets.Keys.TakeWhile(key => key <= inclusiveMaximum).ToArray();
         foreach (var key in keys)
         {
             var bucket = buckets[key];
             buckets.Remove(key);
-            var selected = bucket.SystemPlayback is { } system && system.RootMeanSquare >= SystemActivityThreshold
-                ? system
-                : bucket.Microphone ?? bucket.SystemPlayback;
+            var selected = bucket.Select(mode);
             if (selected is not null)
             {
                 yield return selected;
@@ -223,6 +236,12 @@ internal sealed class WindowsClassroomAudioAdapter : IClassroomAudioSource
         return Math.Sqrt(sum / samples);
     }
 
+    private static double ToMeter(double rootMeanSquare)
+    {
+        var decibels = 20 * Math.Log10(Math.Max(rootMeanSquare, 0.000001));
+        return Math.Clamp((decibels + 60) / 60, 0, 1);
+    }
+
     private static async Task IgnoreCaptureCancellationAsync(Task task)
     {
         try
@@ -231,27 +250,6 @@ internal sealed class WindowsClassroomAudioAdapter : IClassroomAudioSource
         }
         catch (OperationCanceledException)
         {
-        }
-    }
-
-    private sealed class AudioBucket
-    {
-        public PcmAudioFrame? Microphone { get; private set; }
-        public PcmAudioFrame? SystemPlayback { get; private set; }
-
-        public void Add(PcmAudioFrame frame)
-        {
-            if (frame.Route == ClassroomAudioRoute.SystemPlayback)
-            {
-                if (SystemPlayback is null || frame.RootMeanSquare > SystemPlayback.RootMeanSquare)
-                {
-                    SystemPlayback = frame;
-                }
-            }
-            else if (Microphone is null || frame.RootMeanSquare > Microphone.RootMeanSquare)
-            {
-                Microphone = frame;
-            }
         }
     }
 }

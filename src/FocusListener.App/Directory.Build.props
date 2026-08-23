@@ -1,6 +1,0 @@
-<Project>
-  <Import Project="$(MSBuildThisFileDirectory)..\..\Directory.Build.props" />
-  <PropertyGroup>
-    <DefaultItemExcludes>$(DefaultItemExcludes);MainWindow.xaml.cs</DefaultItemExcludes>
-  </PropertyGroup>
-</Project>

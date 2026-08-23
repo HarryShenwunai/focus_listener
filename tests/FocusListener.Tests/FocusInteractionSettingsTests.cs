@@ -16,6 +16,11 @@ public sealed class FocusInteractionSettingsTests
         Assert.Equal(120, settings.PendingLifetimeSeconds);
         Assert.Equal(3, settings.FeedbackSeconds);
         Assert.True(settings.CandidateReadyAnimation);
+        Assert.Equal(AppLanguage.System, settings.AppLanguage);
+        Assert.Null(settings.SessionReminderMinutes);
+        Assert.Equal(30, settings.RetentionDays);
+        Assert.False(settings.OnboardingCompleted);
+        Assert.False(settings.UsageNoticeAccepted);
         Assert.Empty(settings.Validate());
     }
 
@@ -45,6 +50,15 @@ public sealed class FocusInteractionSettingsTests
         };
 
         Assert.Contains(settings.Validate(), error => error.Contains("Ctrl + Shift + Q"));
+    }
+
+    [Fact]
+    public void Only_supported_session_reminders_are_valid()
+    {
+        Assert.Empty((FocusInteractionSettings.Default with { SessionReminderMinutes = 45 }).Validate());
+        Assert.Contains(
+            (FocusInteractionSettings.Default with { SessionReminderMinutes = 12 }).Validate(),
+            error => error.Contains("15、30、45 或 60"));
     }
 
     [Fact]

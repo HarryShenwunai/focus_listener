@@ -12,12 +12,13 @@ internal sealed class SystemDiagnosticsWindow : Window
     private static readonly Brush MutedBrush = CreateBrush(0x5B, 0x69, 0x60);
     private static readonly Brush BorderBrush = CreateBrush(0xDC, 0xE5, 0xDE);
     private static readonly Brush AccentBrush = CreateBrush(0x23, 0x7A, 0x57);
-    private static readonly Brush AccentSoftBrush = CreateBrush(0xE4, 0xF3, 0xEB);
     private static readonly Brush InformationBrush = CreateBrush(0xE9, 0xF1, 0xF7);
     private static readonly Brush InformationTextBrush = CreateBrush(0x28, 0x57, 0x75);
 
     private readonly string? _apiKey;
     private readonly string _outputDirectory;
+    private readonly FocusInteractionSettingsStore _settingsStore;
+    private readonly AudioDevicePicker _audioPicker = new();
     private readonly Dictionary<FocusDiagnosticId, DiagnosticRowVisual> _rows = [];
     private readonly TextBlock _headline = new();
     private readonly TextBlock _summary = new();
@@ -35,15 +36,18 @@ internal sealed class SystemDiagnosticsWindow : Window
     private CancellationTokenSource? _runLifetime;
     private bool _closed;
 
-    public SystemDiagnosticsWindow(string? apiKey, string outputDirectory)
+    public SystemDiagnosticsWindow(string? apiKey, string outputDirectory, FocusInteractionSettingsStore settingsStore)
     {
         _apiKey = apiKey;
         _outputDirectory = outputDirectory;
-        Title = "Focus Listener · 一键系统检测";
+        _settingsStore = settingsStore;
+        var availableHeight = Math.Max(520, SystemParameters.WorkArea.Height - 32);
+        Title = "Focus Listener · " + T("一键系统检测", "System check");
         Width = 720;
-        Height = 780;
+        Height = Math.Min(780, availableHeight);
+        MaxHeight = availableHeight;
         MinWidth = 620;
-        MinHeight = 620;
+        MinHeight = Math.Min(580, availableHeight);
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
         ResizeMode = ResizeMode.CanResize;
         ShowInTaskbar = false;
@@ -51,6 +55,7 @@ internal sealed class SystemDiagnosticsWindow : Window
         FontFamily = new FontFamily("Microsoft YaHei UI");
         Foreground = InkBrush;
         Content = BuildContent();
+        _audioPicker.Load(_settingsStore.Load());
         Closed += Window_Closed;
     }
 
@@ -62,7 +67,7 @@ internal sealed class SystemDiagnosticsWindow : Window
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
         var header = new StackPanel();
-        _headline.Text = "一键系统检测";
+        _headline.Text = T("一键系统检测", "One-click system check");
         _headline.FontSize = 26;
         _headline.FontWeight = FontWeights.SemiBold;
         _headline.Foreground = InkBrush;
@@ -84,6 +89,8 @@ internal sealed class SystemDiagnosticsWindow : Window
             HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled
         };
         var body = new StackPanel();
+        body.Children.Add(SectionTitle("检测所用音频设备"));
+        body.Children.Add(_audioPicker.Build());
         body.Children.Add(BuildInstruction());
         body.Children.Add(BuildAudioPanel());
         body.Children.Add(SectionTitle("逐项结果"));
@@ -100,14 +107,14 @@ internal sealed class SystemDiagnosticsWindow : Window
         footer.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         footer.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         footer.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        _summary.Text = "准备就绪 · 整个检测约需 20–35 秒";
+        _summary.Text = T("准备就绪 · 音频会等待 15 秒，整个检测约需 30–50 秒", "Ready · Audio runs for 15 seconds; the full check takes about 30–50 seconds");
         _summary.Foreground = MutedBrush;
         _summary.FontSize = 12;
         _summary.VerticalAlignment = VerticalAlignment.Center;
         _summary.TextWrapping = TextWrapping.Wrap;
         footer.Children.Add(_summary);
 
-        _stopButton.Content = "停止";
+        _stopButton.Content = T("停止", "Stop");
         _stopButton.IsEnabled = false;
         _stopButton.Margin = new Thickness(12, 0, 8, 0);
         _stopButton.Padding = new Thickness(18, 10, 18, 10);
@@ -117,7 +124,7 @@ internal sealed class SystemDiagnosticsWindow : Window
         Grid.SetColumn(_stopButton, 1);
         footer.Children.Add(_stopButton);
 
-        _startButton.Content = "开始一键检测";
+        _startButton.Content = T("开始一键检测", "Start system check");
         _startButton.Padding = new Thickness(20, 10, 20, 10);
         _startButton.Background = AccentBrush;
         _startButton.Foreground = Brushes.White;
@@ -135,7 +142,7 @@ internal sealed class SystemDiagnosticsWindow : Window
     {
         var text = new TextBlock
         {
-            Text = "点击开始后，请在 10 秒音频检测期间清晰朗读：\n“相遇时间是两个运动物体同时出发后，从开始运动到彼此相遇所经历的时间。”\n要测试系统声音，请同时让电脑播放任意一段有声内容。",
+            Text = T("点击开始后，请准备一两句包含完整知识关系的课堂内容：仅麦克风模式直接朗读；仅系统声音模式请让电脑播放这段语音；自动或智能混合可任选。\n系统会通过所选输出设备播放一段轻柔测试音；麦克风声音不会回放。\n测试题只会根据本次实时转写生成，没有可靠证据时不会用固定素材代替。", "Prepare one or two complete knowledge statements. Read them in microphone-only mode, or play them on the computer in system-sound-only mode. A gentle test tone will also play. Questions use only this live transcript; fixed fallback material is never used."),
             TextWrapping = TextWrapping.Wrap,
             LineHeight = 22,
             Foreground = InformationTextBrush,
@@ -324,7 +331,7 @@ internal sealed class SystemDiagnosticsWindow : Window
     private Border BuildQuestionPanel()
     {
         var panel = new StackPanel();
-        _questionStem.Text = "检测开始后，这里会显示固定知识点生成的无计算三选一题。";
+        _questionStem.Text = "检测开始后，这里会显示根据本次实时转写生成的无计算三选一题。";
         _questionStem.Foreground = MutedBrush;
         _questionStem.FontSize = 14;
         _questionStem.FontWeight = FontWeights.SemiBold;
@@ -374,9 +381,12 @@ internal sealed class SystemDiagnosticsWindow : Window
         ResetPreviews();
 
         var options = string.IsNullOrWhiteSpace(_apiKey) ? null : new GeminiFocusOptions(_apiKey);
-        var diagnostics = FocusDiagnosticsFactory.Create(options, _outputDirectory);
         try
         {
+            var settings = _audioPicker.ApplyTo(_settingsStore.Load());
+            await _settingsStore.SaveAsync(settings, _runLifetime.Token);
+            var diagnostics = FocusDiagnosticsFactory.Create(
+                options, _outputDirectory, AudioCaptureConfiguration.From(settings));
             var result = await diagnostics.RunAsync(
                 new Progress<FocusDiagnosticsView>(Render),
                 _runLifetime.Token);
@@ -471,13 +481,25 @@ internal sealed class SystemDiagnosticsWindow : Window
 
             _questionEvidence.Text = $"课堂证据：{question.Evidence}";
         }
+        else
+        {
+            var questionItem = view.Items.Single(item => item.Id == FocusDiagnosticId.QuestionGeneration);
+            if (questionItem.State is FocusDiagnosticState.Warning or
+                FocusDiagnosticState.Failed or FocusDiagnosticState.Skipped)
+            {
+                _questionStem.Text = questionItem.Detail;
+                _questionStem.Foreground = MutedBrush;
+                _questionChoices.Children.Clear();
+                _questionEvidence.Text = string.Empty;
+            }
+        }
     }
 
     private void ResetPreviews()
     {
         _transcript.Text = "正在等待 Gemini Live 返回文字…";
         _transcript.Foreground = MutedBrush;
-        _questionStem.Text = "等待测试题生成…";
+        _questionStem.Text = "等待根据本次实时转写生成题目…";
         _questionStem.Foreground = MutedBrush;
         _questionChoices.Children.Clear();
         _questionEvidence.Text = string.Empty;
@@ -505,7 +527,10 @@ internal sealed class SystemDiagnosticsWindow : Window
     {
         _closed = true;
         _runLifetime?.Cancel();
+        _audioPicker.Dispose();
     }
+
+    private static string T(string zh, string en) => ProductText.Choose(zh, en);
 
     private static string DiagnosticTitle(FocusDiagnosticId id) => id switch
     {

@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  verify:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+          cache: true
+          cache-dependency-path: "**/packages.lock.json"
+      - name: Restore locked dependencies
+        run: dotnet restore FocusListener.slnx --locked-mode
+      - name: Build Release
+        run: dotnet build FocusListener.slnx -c Release --no-restore
+      - name: Test
+        run: dotnet test FocusListener.slnx -c Release --no-build
+      - name: Verify formatting and analyzers
+        run: dotnet format FocusListener.slnx --verify-no-changes --no-restore
+      - name: Check known dependency vulnerabilities
+        run: dotnet list FocusListener.slnx package --vulnerable --include-transitive

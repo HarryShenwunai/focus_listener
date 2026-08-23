@@ -18,17 +18,3 @@ public sealed record GeminiFocusOptions(string ApiKey)
         }
     }
 }
-
-public static class ProductionFocusSessionFactory
-{
-    public static IFocusSession Create(GeminiFocusOptions options, string databasePath)
-    {
-        ArgumentNullException.ThrowIfNull(options);
-        options.Validate();
-        var clock = new SystemSessionClock();
-        return new FocusSession(
-            new GeminiQuestionCandidateAdapter(options, clock),
-            new SqliteSessionJournalAdapter(databasePath),
-            clock);
-    }
-}

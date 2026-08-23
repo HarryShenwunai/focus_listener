@@ -292,14 +292,7 @@ public partial class MainWindow
 
     private void UpdateExperienceButtonsV3()
     {
-        TranscriptionToggleButton.Content = _activeSettingsV2.RealTimeTranscriptionEnabled
-            ? "转写：开"
-            : "转写：关";
-        SubtitleToggleButton.Content = _activeSettingsV2.SubtitleWindowEnabled
-            ? "字幕：显示"
-            : "字幕：隐藏";
-        var locked = _subtitleWindowV3?.IsLocked ?? _activeSettingsV2.SubtitleClickThrough;
-        SubtitleLockButton.Content = locked ? "字幕：已锁定" : "字幕：可移动";
+        ApplyLanguageToExperienceButtonsV3();
     }
 
     private async Task PersistSettingsV3()

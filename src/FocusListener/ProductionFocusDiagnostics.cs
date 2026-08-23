@@ -1,4 +1,4 @@
-using System.Text;
+using System.Threading.Channels;
 using Google.GenAI;
 using Google.GenAI.Types;
 using Microsoft.Data.Sqlite;
@@ -9,12 +9,15 @@ public static class FocusDiagnosticsFactory
 {
     public static IFocusDiagnostics Create(
         GeminiFocusOptions? gemini,
-        string outputDirectory)
+        string outputDirectory,
+        AudioCaptureConfiguration? audio = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(outputDirectory);
         return new FocusDiagnostics(new WindowsGeminiDiagnosticRuntime(
             gemini,
             Path.GetFullPath(outputDirectory),
+            audio ?? AudioCaptureConfiguration.Default,
+            TimeSpan.FromSeconds(15),
             TimeSpan.FromSeconds(10)));
     }
 }
@@ -22,20 +25,19 @@ public static class FocusDiagnosticsFactory
 internal sealed class WindowsGeminiDiagnosticRuntime(
     GeminiFocusOptions? gemini,
     string outputDirectory,
-    TimeSpan audioDuration) : IFocusDiagnosticRuntime
+    AudioCaptureConfiguration audioConfiguration,
+    TimeSpan audioDuration,
+    TimeSpan transcriptionTail) : IFocusDiagnosticRuntime
 {
-    private const string QuestionTestTranscript =
-        "相遇时间是两个运动物体同时出发后，从开始运动到彼此相遇所经历的时间。";
-
-    private readonly WindowsDiagnosticAudioSource _audio = new();
+    private readonly WindowsDiagnosticAudioSource _audio = new(audioConfiguration);
 
     public async Task RunAsync(
         IProgress<FocusDiagnosticSignal> progress,
         CancellationToken cancellation)
     {
         var keyValid = await ProbeGeminiKeyAsync(progress, cancellation);
-        await ProbeAudioAndLiveAsync(progress, keyValid, cancellation);
-        await ProbeQuestionGenerationAsync(progress, keyValid, cancellation);
+        var liveTranscript = await ProbeAudioAndLiveAsync(progress, keyValid, cancellation);
+        await ProbeQuestionGenerationAsync(progress, keyValid, liveTranscript, cancellation);
         await ProbeStorageAsync(progress, cancellation);
     }
 
@@ -120,7 +122,7 @@ internal sealed class WindowsGeminiDiagnosticRuntime(
                 FocusDiagnosticId.LiveTranscription,
                 FocusDiagnosticState.Skipped,
                 "未连接 Live，仍会完成本地双路音频检测"));
-            await DrainAudioAsync(audio, cancellation);
+            await DrainAudioWithToneAsync(audio, cancellation);
             return string.Empty;
         }
 
@@ -158,7 +160,7 @@ internal sealed class WindowsGeminiDiagnosticRuntime(
                 FocusDiagnosticId.LiveTranscription,
                 FocusDiagnosticState.Skipped,
                 "Live 未连接，无法转写"));
-            await DrainAudioAsync(audio, cancellation);
+            await DrainAudioWithToneAsync(audio, cancellation);
             return string.Empty;
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
@@ -171,16 +173,30 @@ internal sealed class WindowsGeminiDiagnosticRuntime(
                 FocusDiagnosticId.LiveTranscription,
                 FocusDiagnosticState.Skipped,
                 "Live 未连接，无法转写"));
-            await DrainAudioAsync(audio, cancellation);
+            await DrainAudioWithToneAsync(audio, cancellation);
             return string.Empty;
         }
 
         await using (session)
         {
-            var transcript = new StringBuilder();
+            var collector = new LiveTranscriptionCollector();
             Exception? streamFailure = null;
-            var sendTask = SendAudioAsync(session, audio, cancellation);
+            var frames = Channel.CreateBounded<PcmAudioFrame>(new BoundedChannelOptions(64)
+            {
+                SingleReader = true,
+                SingleWriter = true,
+                FullMode = BoundedChannelFullMode.DropOldest
+            });
+            var audioPump = PumpAudioAsync(audio, frames.Writer, cancellation);
+            var testTone = PlayDiagnosticToneAsync(cancellation);
+            var sendTask = SendAudioAsync(session, frames.Reader.ReadAllAsync(cancellation), cancellation);
+            using var receiveLifetime = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
+            var receiveTask = session.ReceiveAsync(receiveLifetime.Token);
             DateTimeOffset? receiveTailEndsAt = null;
+            var serverMessages = 0;
+            var interimUpdates = 0;
+            var finalUpdates = 0;
+            var modelTurnCompletes = 0;
 
             try
             {
@@ -188,7 +204,17 @@ internal sealed class WindowsGeminiDiagnosticRuntime(
                 {
                     if (sendTask.IsCompleted && receiveTailEndsAt is null)
                     {
-                        receiveTailEndsAt = DateTimeOffset.UtcNow.AddSeconds(3);
+                        receiveTailEndsAt = DateTimeOffset.UtcNow.Add(transcriptionTail);
+                        progress.Report(new FocusDiagnosticSignal(
+                            FocusDiagnosticId.LiveTranscription,
+                            FocusDiagnosticState.Running,
+                            $"音频发送完毕，等待最终转写（最多 {transcriptionTail.TotalSeconds:0} 秒）",
+                            Preview: collector.Text));
+                    }
+
+                    if (sendTask.IsCompleted && collector.IsFinished)
+                    {
+                        break;
                     }
 
                     if (receiveTailEndsAt is { } tail && DateTimeOffset.UtcNow >= tail)
@@ -196,37 +222,55 @@ internal sealed class WindowsGeminiDiagnosticRuntime(
                         break;
                     }
 
-                    using var receiveTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
-                    receiveTimeout.CancelAfter(TimeSpan.FromSeconds(1));
-                    try
+                    var completed = await Task.WhenAny(
+                        receiveTask,
+                        Task.Delay(TimeSpan.FromMilliseconds(250), cancellation));
+                    if (!ReferenceEquals(completed, receiveTask))
                     {
-                        var message = await session.ReceiveAsync(receiveTimeout.Token);
-                        if (message is null)
-                        {
-                            break;
-                        }
-
-                        var content = message.ServerContent;
-                        var update = content?.InputTranscription?.Text;
-                        if (!string.IsNullOrWhiteSpace(update))
-                        {
-                            MergeTranscript(transcript, update);
-                            progress.Report(new FocusDiagnosticSignal(
-                                FocusDiagnosticId.LiveTranscription,
-                                FocusDiagnosticState.Running,
-                                "正在接收文字",
-                                Preview: transcript.ToString()));
-                        }
-
-                        if (sendTask.IsCompleted &&
-                            (content?.InputTranscription?.Finished == true || content?.TurnComplete == true))
-                        {
-                            break;
-                        }
+                        continue;
                     }
-                    catch (OperationCanceledException) when (!cancellation.IsCancellationRequested)
+
+                    var message = await receiveTask;
+                    if (message is null)
                     {
+                        streamFailure = new InvalidOperationException("Live closed before transcription completed.");
+                        break;
                     }
+
+                    serverMessages++;
+                    var content = message.ServerContent;
+                    var interim = content?.InterimInputTranscription;
+                    var final = content?.InputTranscription;
+                    if (!string.IsNullOrWhiteSpace(interim?.Text))
+                    {
+                        interimUpdates++;
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(final?.Text) || final?.Finished == true)
+                    {
+                        finalUpdates++;
+                    }
+
+                    if (content?.TurnComplete == true)
+                    {
+                        modelTurnCompletes++;
+                    }
+
+                    var changed = collector.Apply(new LiveTranscriptionEvent(
+                        interim?.Text,
+                        final?.Text,
+                        final?.Finished == true,
+                        content?.TurnComplete == true));
+                    if (changed)
+                    {
+                        progress.Report(new FocusDiagnosticSignal(
+                            FocusDiagnosticId.LiveTranscription,
+                            FocusDiagnosticState.Running,
+                            final is not null ? "正在接收最终转写" : "正在接收临时转写",
+                            Preview: collector.Text));
+                    }
+
+                    receiveTask = session.ReceiveAsync(receiveLifetime.Token);
                 }
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
@@ -234,9 +278,33 @@ internal sealed class WindowsGeminiDiagnosticRuntime(
                 streamFailure = exception;
             }
 
+            receiveLifetime.Cancel();
             try
             {
-                await sendTask;
+                await receiveTask;
+            }
+            catch (OperationCanceledException) when (receiveLifetime.IsCancellationRequested)
+            {
+            }
+            catch (Exception exception)
+            {
+                streamFailure ??= exception;
+            }
+
+            try
+            {
+                await audioPump;
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                streamFailure ??= exception;
+            }
+            await testTone;
+
+            var sendMetrics = AudioSendMetrics.Empty;
+            try
+            {
+                sendMetrics = await sendTask;
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
@@ -258,23 +326,32 @@ internal sealed class WindowsGeminiDiagnosticRuntime(
                 progress.Report(new FocusDiagnosticSignal(
                     FocusDiagnosticId.GeminiLive,
                     FocusDiagnosticState.Warning,
-                    "已连接，但音频流在检测途中中断"));
+                    $"已连接，但流式传输异常 · 已发送 {sendMetrics.Frames} 帧"));
+            }
+            else
+            {
+                progress.Report(new FocusDiagnosticSignal(
+                    FocusDiagnosticId.GeminiLive,
+                    FocusDiagnosticState.Passed,
+                    $"连接正常 · 已发送 {sendMetrics.Frames} 帧 / 服务端 {serverMessages} 条消息"));
             }
 
-            var finalTranscript = transcript.ToString().Trim();
+            var finalTranscript = collector.Text;
             if (finalTranscript.Length == 0)
             {
                 progress.Report(new FocusDiagnosticSignal(
                     FocusDiagnosticId.LiveTranscription,
                     FocusDiagnosticState.Warning,
-                    "Live 已连接，但未收到文字；重试并清晰朗读测试句"));
+                    $"已发送 {sendMetrics.Frames} 帧（{sendMetrics.Bytes / 1024d:0} KB），" +
+                    $"服务端消息 {serverMessages} 条、临时转写 {interimUpdates} 条、最终转写 {finalUpdates} 条、" +
+                    $"模型回合结束 {modelTurnCompletes} 条；仍未收到文字"));
             }
             else
             {
                 progress.Report(new FocusDiagnosticSignal(
                     FocusDiagnosticId.LiveTranscription,
                     FocusDiagnosticState.Passed,
-                    $"收到 {finalTranscript.Length} 个字符",
+                    $"收到 {finalTranscript.Length} 个字符 · 临时 {interimUpdates} 条 / 最终 {finalUpdates} 条",
                     Preview: finalTranscript));
             }
 
@@ -285,6 +362,7 @@ internal sealed class WindowsGeminiDiagnosticRuntime(
     private async Task ProbeQuestionGenerationAsync(
         IProgress<FocusDiagnosticSignal> progress,
         bool keyValid,
+        string liveTranscript,
         CancellationToken cancellation)
     {
         if (!keyValid || gemini is null)
@@ -296,17 +374,27 @@ internal sealed class WindowsGeminiDiagnosticRuntime(
             return;
         }
 
+        var questionInput = DiagnosticQuestionInput.Create(liveTranscript, DateTimeOffset.UtcNow);
+        if (questionInput is null)
+        {
+            progress.Report(new FocusDiagnosticSignal(
+                FocusDiagnosticId.QuestionGeneration,
+                FocusDiagnosticState.Warning,
+                "本次未收到实时转写文字；按证据保护规则不生成题目"));
+            return;
+        }
+
         progress.Report(new FocusDiagnosticSignal(
             FocusDiagnosticId.QuestionGeneration,
             FocusDiagnosticState.Running,
-            $"正在用固定知识点测试 {gemini.QuestionModel}"));
+            $"正在根据本次实时转写测试 {gemini.QuestionModel}"));
         try
         {
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
             timeout.CancelAfter(TimeSpan.FromSeconds(20));
             using var generator = new GeminiRestatementQuestionGenerator(gemini);
             var candidate = await generator.TryGenerateAsync(
-                new TranscriptUnit(QuestionTestTranscript, DateTimeOffset.UtcNow, TimeSpan.Zero),
+                questionInput,
                 TriggerKind.Automatic,
                 timeout.Token);
             if (candidate is null)
@@ -376,7 +464,13 @@ internal sealed class WindowsGeminiDiagnosticRuntime(
                 startedAt,
                 cancellation);
             await journal.AppendAsync(
-                new SessionEvent(sessionId, DateTimeOffset.UtcNow, "SystemDiagnosticProbe", new { Result = "ok" }),
+                new SessionEvent(sessionId, DateTimeOffset.UtcNow, "SystemDiagnosticProbe", new
+                {
+                    Result = "ok",
+                    AudioMode = audioConfiguration.Mode.ToString(),
+                    MicrophoneDevice = audioConfiguration.MicrophoneDeviceName,
+                    SystemPlaybackDevice = audioConfiguration.SystemPlaybackDeviceName
+                }),
                 cancellation);
             await journal.CompleteAsync(
                 new SessionSummary(
@@ -457,11 +551,37 @@ internal sealed class WindowsGeminiDiagnosticRuntime(
         }
     };
 
-    private static async Task SendAudioAsync(
+    private static async Task PumpAudioAsync(
+        IAsyncEnumerable<PcmAudioFrame> audio,
+        ChannelWriter<PcmAudioFrame> output,
+        CancellationToken cancellation)
+    {
+        Exception? failure = null;
+        try
+        {
+            await foreach (var frame in audio.WithCancellation(cancellation))
+            {
+                output.TryWrite(frame);
+            }
+        }
+        catch (Exception exception)
+        {
+            failure = exception;
+            throw;
+        }
+        finally
+        {
+            output.TryComplete(failure);
+        }
+    }
+
+    private static async Task<AudioSendMetrics> SendAudioAsync(
         AsyncSession session,
         IAsyncEnumerable<PcmAudioFrame> audio,
         CancellationToken cancellation)
     {
+        var frames = 0;
+        long bytes = 0;
         await foreach (var frame in audio.WithCancellation(cancellation))
         {
             await session.SendRealtimeInputAsync(
@@ -474,11 +594,42 @@ internal sealed class WindowsGeminiDiagnosticRuntime(
                     }
                 },
                 cancellation);
+            frames++;
+            bytes += frame.Pcm16.Length;
         }
 
         await session.SendRealtimeInputAsync(
             new LiveSendRealtimeInputParameters { AudioStreamEnd = true },
             cancellation);
+        return new AudioSendMetrics(frames, bytes);
+    }
+
+    private async Task DrainAudioWithToneAsync(
+        IAsyncEnumerable<PcmAudioFrame> audio,
+        CancellationToken cancellation)
+    {
+        await Task.WhenAll(
+            DrainAudioAsync(audio, cancellation),
+            PlayDiagnosticToneAsync(cancellation));
+    }
+
+    private async Task PlayDiagnosticToneAsync(CancellationToken cancellation)
+    {
+        await Task.Delay(TimeSpan.FromSeconds(2), cancellation);
+        try
+        {
+            await WindowsAudioDevices.PlayTestToneAsync(
+                audioConfiguration.SystemPlaybackDeviceId,
+                cancellation);
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            // The independent system-sound probe reports a precise device failure.
+        }
     }
 
     private static async Task DrainAudioAsync(
@@ -487,26 +638,6 @@ internal sealed class WindowsGeminiDiagnosticRuntime(
     {
         await foreach (var _ in audio.WithCancellation(cancellation))
         {
-        }
-    }
-
-    private static void MergeTranscript(StringBuilder transcript, string update)
-    {
-        var normalized = update.Trim();
-        var current = transcript.ToString();
-        if (normalized.StartsWith(current, StringComparison.Ordinal))
-        {
-            transcript.Clear();
-            transcript.Append(normalized);
-        }
-        else if (!current.EndsWith(normalized, StringComparison.Ordinal))
-        {
-            if (transcript.Length > 0 && !char.IsPunctuation(transcript[^1]))
-            {
-                transcript.Append(' ');
-            }
-
-            transcript.Append(normalized);
         }
     }
 
@@ -527,5 +658,10 @@ internal sealed class WindowsGeminiDiagnosticRuntime(
             "SELECT COUNT(*) FROM session_events WHERE session_id = $session AND event_type = 'SystemDiagnosticProbe';";
         command.Parameters.AddWithValue("$session", sessionId.ToString());
         return Convert.ToInt64(await command.ExecuteScalarAsync(cancellation));
+    }
+
+    private sealed record AudioSendMetrics(int Frames, long Bytes)
+    {
+        public static AudioSendMetrics Empty { get; } = new(0, 0);
     }
 }

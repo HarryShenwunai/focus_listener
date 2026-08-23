@@ -5,6 +5,15 @@ Status: expanded design confirmed on 2026-08-22. This document defines the first
 ## Product outcome
 
 Focus Listener is a personal Windows classroom companion for the Learner. Its sole primary outcome is an Attention Reset: a brief interaction that redirects attention to the lesson currently being taught. A Reset Question checks comprehension only as the mechanism for producing that reset; it is not an assessment, teacher tool, or engagement score.
+## Portable Beta contract
+
+- Audience: adults and higher-education learners only.
+- Distribution: unsigned, self-contained Windows 10/11 x64 ZIP published as a GitHub prerelease.
+- Interface: Simplified Chinese and English; classroom content retains its original language.
+- Sessions end only when the Learner chooses to end them; an optional 15/30/45/60-minute notice never stops listening.
+- Gemini access uses the Learner's own validated key.
+- No automatic telemetry or background update checks.
+- Local question, evidence, answer, timing, and technical-event data is retained for 30 days by default.
 
 ## First test scope
 
@@ -44,7 +53,7 @@ The MVP excludes:
 ## Core flow
 
 1. On first real use, the Learner selects the actual microphone, system-output endpoint, and capture mode; the app never silently replaces a missing selected device.
-2. The Learner starts a 10–15 minute Focus Session.
+2. The Learner starts a Focus Session and optionally selects one non-blocking reminder; no duration automatically stops capture.
 3. The app opens the selected route or routes, time-aligns dual-route frames, and forwards one authoritative stream rather than naively adding both PCM streams.
 4. Gemini Live streams temporary text to the optional subtitle window and produces completed transcript turns for question generation. Temporary text never enters the candidate pipeline.
 5. Gemini Flash-Lite examines the recent final-transcript window and either rejects it or returns an Eligible Unit and a schema-valid Restatement Question in one structured result.
@@ -157,7 +166,7 @@ Correctness is an analysis variable, not the primary Attention Reset outcome. CS
 
 ## Functional acceptance test
 
-Use authorized 10–15-minute spoken lessons covering all six relationship types across mathematics, science, history, language, and other subjects in five conditions:
+Use authorized 45–90-minute spoken lessons covering all six relationship types across mathematics, science, history, language, and other subjects in five conditions:
 
 1. clear playback;
 2. distant microphone;
@@ -226,6 +235,6 @@ API-key setup and Windows Credential Manager access belong to a separate Setup M
 4. **Windows audio**: add dual WASAPI capture, timestamps, bounded buffers, arbitration, device-loss degradation, and scripted-audio comparison tests.
 5. **Gemini transcription**: connect the authoritative audio stream to Gemini Live with completed-turn handling and bounded recovery.
 6. **Gemini reasoning**: add Flash-Lite schema, eligibility/question prompt, local validation, and one repair attempt.
-7. **Functional matrix**: run the five accepted 10–15 minute conditions and evaluate only the functional acceptance criteria above.
+7. **Functional matrix**: run the accepted long-session, device, network, bilingual, accessibility, retention, and clean-machine release conditions.
 
 Do not add provider plugins, FastAPI, a local HTTP server, a teacher workflow, or a persisted transcript browser. They add interfaces without increasing leverage for the first product question.

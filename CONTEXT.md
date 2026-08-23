@@ -25,3 +25,21 @@ A Knowledge Unit that passed all hard question and evidence rules and can wait i
 _Avoid_: Pending answer, generated popup, raw transcript
 
 **Candidate Ready（题目已准备）**:
+The learner-visible state that at least one Question Candidate can be shown immediately without waiting for a new transcript turn.
+_Avoid_: Question displayed, answer pending
+
+**Lesson Session（课堂会话）**:
+The period during which the Learner intentionally keeps Focus Listener listening to one lesson. It continues until the Learner ends it; a reminder never ends it automatically.
+_Avoid_: Recording, fixed-duration test, background monitoring
+
+**Session Reminder（课堂提醒）**:
+An optional one-time notice that a Lesson Session has reached the learner-selected elapsed time. It is not a timeout and does not stop listening.
+_Avoid_: Session limit, automatic stop
+
+**Lesson Evidence（课堂证据）**:
+A short continuous excerpt from the current lesson that directly supports a Reset Question and its correct choice.
+_Avoid_: Full transcript, model explanation, external citation
+
+**Authorized Lesson Content（获授权课堂内容）**:
+Lesson audio the Learner has the right and permission to capture and submit to the configured model provider.
+_Avoid_: Publicly accessible content, assumed consent

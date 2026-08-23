@@ -9,23 +9,26 @@ public partial class MainWindow
     private FocusInteractionSettings _activeSettingsV2 = FocusInteractionSettings.Default;
     private bool _candidateAnimatingV2;
 
-    private string SettingsPathV2 => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "FocusListener",
-        "settings.json");
+    private string SettingsPathV2 => ProductRuntime.SettingsPath;
+    private string DiagnosticsDirectoryV2 => ProductRuntime.DiagnosticsDirectory;
 
-    private string DiagnosticsDirectoryV2 => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "FocusListener",
-        "diagnostics");
-
-    private void Window_LoadedV2(object sender, RoutedEventArgs e)
+    private async void Window_LoadedV2(object sender, RoutedEventArgs e)
     {
         Window_Loaded(sender, e);
         _settingsStoreV2 = new FocusInteractionSettingsStore(SettingsPathV2);
         _activeSettingsV2 = _settingsStoreV2.Load();
+        ProductText.Use(_activeSettingsV2.AppLanguage);
+        ApplyLanguageV3();
         UpdateModeLabelV2();
         InitializeAudioExperienceV3();
+        try
+        {
+            await SqliteDataRetention.PurgeExpiredAsync(_databasePath, _activeSettingsV2.RetentionDays, _lifetime.Token);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or Microsoft.Data.Sqlite.SqliteException)
+        {
+            StatusText.Text = ProductText.Choose("旧分析数据将在下次启动时重试清理。", "Old analytics data will be cleaned up on the next launch.");
+        }
     }
 
     private async void StartSessionV2_Click(object sender, RoutedEventArgs e)
@@ -37,6 +40,17 @@ public partial class MainWindow
 
         _settingsStoreV2 ??= new FocusInteractionSettingsStore(SettingsPathV2);
         _activeSettingsV2 = _settingsStoreV2.Load();
+        if (!_activeSettingsV2.OnboardingCompleted || !_activeSettingsV2.UsageNoticeAccepted)
+        {
+            _onboardingChecked = false;
+            ShowOnboardingIfNeeded();
+            _activeSettingsV2 = _settingsStoreV2.Load();
+            if (!_activeSettingsV2.OnboardingCompleted || !_activeSettingsV2.UsageNoticeAccepted)
+            {
+                StatusText.Text = ProductText.Choose("完成首次使用确认后才能开始课堂。", "Complete first-run confirmation before starting a lesson.");
+                return;
+            }
+        }
         var live = !string.IsNullOrWhiteSpace(_apiKey);
         if (!EnsureAudioSetupV3(live))
         {
@@ -61,7 +75,11 @@ public partial class MainWindow
         FeedbackDurationText.Text = $"{_activeSettingsV2.FeedbackSeconds} 秒后继续监听";
         var progress = new Progress<SessionView>(RenderV2);
         _sessionTask = _session.RunAsync(
-            new SessionStart(live ? ClassroomKind.InPerson : ClassroomKind.ComputerPlayback, TimeSpan.FromMinutes(12)),
+            new SessionStart(
+                live ? ClassroomKind.InPerson : ClassroomKind.ComputerPlayback,
+                _activeSettingsV2.SessionReminderMinutes is { } reminder
+                    ? TimeSpan.FromMinutes(reminder)
+                    : null),
             progress,
             _lifetime.Token);
 
@@ -75,9 +93,10 @@ public partial class MainWindow
         }
         catch (Exception exception)
         {
+            ProductRuntime.Log("LessonSessionFailed", exception);
             ShowOnly(CompletedPanel);
-            SummaryText.Text = $"会话意外停止：{exception.Message}";
-            StatusText.Text = "错误";
+            SummaryText.Text = ProductText.Choose("课堂意外停止。请运行系统检测或导出诊断包。", "The lesson stopped unexpectedly. Run system check or export a diagnostic bundle.");
+            StatusText.Text = ProductText.Choose("需要处理", "Needs attention");
         }
         finally
         {
@@ -136,8 +155,10 @@ public partial class MainWindow
     {
         var live = !string.IsNullOrWhiteSpace(_apiKey);
         ModeLabel.Text = live
-            ? "真实课堂已就绪 · 全学科知识点"
-            : "模拟课堂 · 点击标题配置 Gemini 免费层";
-        StartSessionButtonV2.Content = live ? "开始 12 分钟真实课堂" : "开始 12 分钟模拟课堂";
+            ? ProductText.Choose("真实课堂已就绪 · 全学科知识点", "Real lesson ready · All subjects")
+            : ProductText.Choose("模拟课堂 · 点击标题配置 Gemini 免费层", "Simulation · Choose the heading to configure Gemini");
+        StartSessionButtonV2.Content = live
+            ? ProductText.Choose("开始真实课堂", "Start real lesson")
+            : ProductText.Choose("开始模拟课堂", "Start simulation");
     }
 }

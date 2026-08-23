@@ -17,10 +17,10 @@ public static class AudioCaptureModeDisplay
 {
     public static string Chinese(AudioCaptureMode mode) => mode switch
     {
-        AudioCaptureMode.Microphone => "仅麦克风",
-        AudioCaptureMode.SystemPlayback => "仅系统声音",
-        AudioCaptureMode.SmartMix => "智能混合",
-        _ => "自动选择"
+        AudioCaptureMode.Microphone => ProductText.Choose("仅麦克风", "Microphone only"),
+        AudioCaptureMode.SystemPlayback => ProductText.Choose("仅系统声音", "System sound only"),
+        AudioCaptureMode.SmartMix => ProductText.Choose("智能混合", "Smart mix"),
+        _ => ProductText.Choose("自动选择", "Automatic")
     };
 }
 
@@ -31,8 +31,8 @@ public sealed record AudioDeviceInfo(
     bool IsAvailable = true)
 {
     public string DisplayName => IsAvailable
-        ? IsDefault ? $"{Name}（Windows 默认）" : Name
-        : $"{Name}（当前不可用）";
+        ? IsDefault ? ProductText.Choose($"{Name}（Windows 默认）", $"{Name} (Windows default)") : Name
+        : ProductText.Choose($"{Name}（当前不可用）", $"{Name} (unavailable)");
 }
 
 public sealed record AudioDeviceSnapshot(
@@ -50,9 +50,9 @@ public sealed record AudioCaptureConfiguration(
     public static AudioCaptureConfiguration Default { get; } = new(
         AudioCaptureMode.Automatic,
         null,
-        "Windows 默认麦克风",
+        ProductText.Choose("Windows 默认麦克风", "Windows default microphone"),
         null,
-        "Windows 默认系统输出");
+        ProductText.Choose("Windows 默认系统输出", "Windows default system output"));
 
     public static AudioCaptureConfiguration From(FocusInteractionSettings settings)
     {
@@ -60,9 +60,9 @@ public sealed record AudioCaptureConfiguration(
         return new AudioCaptureConfiguration(
             settings.AudioMode,
             EmptyToNull(settings.MicrophoneDeviceId),
-            EmptyToNull(settings.MicrophoneDeviceName) ?? "Windows 默认麦克风",
+            EmptyToNull(settings.MicrophoneDeviceName) ?? ProductText.Choose("Windows 默认麦克风", "Windows default microphone"),
             EmptyToNull(settings.SystemPlaybackDeviceId),
-            EmptyToNull(settings.SystemPlaybackDeviceName) ?? "Windows 默认系统输出");
+            EmptyToNull(settings.SystemPlaybackDeviceName) ?? ProductText.Choose("Windows 默认系统输出", "Windows default system output"));
     }
 
     public string DisplayName => AudioCaptureModeDisplay.Chinese(Mode);
@@ -86,8 +86,8 @@ public sealed record AudioCaptureConfiguration(
         : SystemPlaybackDeviceId;
 
     internal string DeviceName(ClassroomAudioRoute route) => route == ClassroomAudioRoute.Microphone
-        ? MicrophoneDeviceName ?? "Windows 默认麦克风"
-        : SystemPlaybackDeviceName ?? "Windows 默认系统输出";
+        ? MicrophoneDeviceName ?? ProductText.Choose("Windows 默认麦克风", "Windows default microphone")
+        : SystemPlaybackDeviceName ?? ProductText.Choose("Windows 默认系统输出", "Windows default system output");
 
     private static string? EmptyToNull(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 }

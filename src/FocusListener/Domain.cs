@@ -80,7 +80,7 @@ public enum SessionHealth
 
 public sealed record SessionStart(
     ClassroomKind ClassroomKind,
-    TimeSpan PlannedDuration);
+    TimeSpan? ReminderAfter = null);
 
 public sealed record QuestionChoice(
     ChoiceId Id,

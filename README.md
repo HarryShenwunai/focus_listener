@@ -1,5 +1,9 @@
 # Focus Listener
 
+**Current channel:** `v0.1.0-beta.1` unsigned Portable Beta for Windows 10/11 x64. It is intended for adults and higher-education learners.
+
+**当前渠道：** `v0.1.0-beta.1`，适用于 Windows 10/11 x64 的未签名便携 Beta，仅面向成人与高校学习者。
+
 一个 Windows 课堂注意力复位小组件。它在听课途中识别数学、科学、历史、语言及其他学科中完整、可复述的知识关系，自动弹出不要求计算的三选一问题，也支持 `Ctrl + Shift + Q` 手动触发。
 
 当前仓库包含可运行的 MVP：
@@ -19,7 +23,22 @@
 - 本地 SQLite 事件记录和 CSV 导出，不保存原始音频或完整课堂转写；
 - 无 API Key 时可直接使用内置多学科模拟课堂。
 
-## 运行
+## 下载与首次运行
+
+1. 从 [GitHub Releases](https://github.com/HarryShenwunai/focus_listener/releases) 下载最新 `FocusListener-v*-win-x64.zip` 和 `SHA256SUMS.txt`。
+2. 校验 SHA-256 后解压，运行 `FocusListener.exe`。这是未签名 Beta，Windows 可能显示来源或 SmartScreen 提示；不要运行校验值不匹配的文件。
+3. 首次引导中选择语言，确认成人与授权音频要求，再连接 Gemini Key 或先体验模拟模式。
+4. 第一次真实课堂前运行“一键系统检测”。
+
+The portable build is self-contained and does not require a separate .NET installation. It has no installer or automatic updater; use **Help & About → Check for updates** manually.
+
+便携版无需另行安装 .NET，也没有安装器或自动更新；请通过“帮助与关于 → 检查更新”手动查询。
+
+## 隐私边界
+
+真实课堂音频会使用用户自己的 Key 直接发送给 Google。请勿使用敏感、机密、个人或未经授权的内容。API Key 保存在 Windows 凭据管理器；原始音频和完整转写不会写入磁盘；本地分析默认保留 30 天。详见 [PRIVACY.md](PRIVACY.md)。
+
+## 从源码运行
 
 需要 Windows 10 19041 或更高版本，以及 .NET SDK `10.0.400`。
 

@@ -1,5 +1,0 @@
-<Project>
-  <ItemGroup Condition="'$(MSBuildProjectName)' == 'FocusListener'">
-    <Compile Remove="ProductionFocusDiagnostics.cs" />
-  </ItemGroup>
-</Project>

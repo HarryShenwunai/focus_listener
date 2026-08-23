@@ -1,5 +1,3 @@
-using System.Text;
-
 namespace FocusListener;
 
 internal sealed record LiveTranscriptionEvent(
@@ -10,20 +8,25 @@ internal sealed record LiveTranscriptionEvent(
 
 internal sealed class LiveTranscriptionCollector
 {
-    private readonly StringBuilder _text = new();
+    private string _committed = string.Empty;
+    private string _interim = string.Empty;
 
-    public string Text => _text.ToString().Trim();
+    public string CommittedText => _committed;
+    public string InterimText => _interim;
+    public string Text => Combine(_committed, _interim);
     public bool IsFinished { get; private set; }
 
     public bool Apply(LiveTranscriptionEvent update)
     {
         var before = Text;
-        var candidate = !string.IsNullOrWhiteSpace(update.FinalText)
-            ? update.FinalText
-            : update.InterimText;
-        if (!string.IsNullOrWhiteSpace(candidate))
+        if (!string.IsNullOrWhiteSpace(update.FinalText))
         {
-            Merge(candidate);
+            MergeFinal(update.FinalText.Trim());
+            _interim = string.Empty;
+        }
+        else if (!string.IsNullOrWhiteSpace(update.InterimText))
+        {
+            _interim = update.InterimText.Trim();
         }
 
         if (update.FinalFinished)
@@ -34,28 +37,41 @@ internal sealed class LiveTranscriptionCollector
         return !string.Equals(before, Text, StringComparison.Ordinal);
     }
 
-    private void Merge(string update)
+    private void MergeFinal(string update)
     {
-        var normalized = update.Trim();
-        var current = _text.ToString();
-        if (normalized.StartsWith(current, StringComparison.Ordinal))
+        if (_committed.Length == 0 || update.StartsWith(_committed, StringComparison.Ordinal))
         {
-            _text.Clear();
-            _text.Append(normalized);
+            _committed = update;
             return;
         }
 
-        if (current.StartsWith(normalized, StringComparison.Ordinal) ||
-            current.EndsWith(normalized, StringComparison.Ordinal))
+        if (_committed.EndsWith(update, StringComparison.Ordinal))
         {
             return;
         }
 
-        if (_text.Length > 0 && !char.IsPunctuation(_text[^1]))
+        _committed = Combine(_committed, update);
+    }
+
+    private static string Combine(string first, string second)
+    {
+        var left = first.Trim();
+        var right = second.Trim();
+        if (left.Length == 0)
         {
-            _text.Append(' ');
+            return right;
         }
 
-        _text.Append(normalized);
+        if (right.Length == 0 || left.EndsWith(right, StringComparison.Ordinal))
+        {
+            return left;
+        }
+
+        if (right.StartsWith(left, StringComparison.Ordinal))
+        {
+            return right;
+        }
+
+        return char.IsPunctuation(left[^1]) ? left + right : left + " " + right;
     }
 }

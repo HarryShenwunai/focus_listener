@@ -7,6 +7,7 @@ namespace FocusListener;
 
 internal sealed class SqliteSessionJournalAdapter : ISessionJournal
 {
+    private const int CurrentSchemaVersion = 2;
     private static readonly (string Name, string SqlType)[] AnalyticsColumns =
     [
         ("subject", "TEXT NULL"),
@@ -22,12 +23,14 @@ internal sealed class SqliteSessionJournalAdapter : ISessionJournal
         ("generation_failure_reason", "TEXT NULL")
     ];
 
+    private readonly string _databasePath;
     private readonly string _connectionString;
     private readonly SemaphoreSlim _writeGate = new(1, 1);
 
     public SqliteSessionJournalAdapter(string databasePath)
     {
-        var directory = Path.GetDirectoryName(databasePath);
+        _databasePath = Path.GetFullPath(databasePath);
+        var directory = Path.GetDirectoryName(_databasePath);
         if (!string.IsNullOrWhiteSpace(directory))
         {
             Directory.CreateDirectory(directory);
@@ -35,7 +38,7 @@ internal sealed class SqliteSessionJournalAdapter : ISessionJournal
 
         _connectionString = new SqliteConnectionStringBuilder
         {
-            DataSource = databasePath,
+            DataSource = _databasePath,
             Mode = SqliteOpenMode.ReadWriteCreate,
             Cache = SqliteCacheMode.Shared
         }.ToString();
@@ -52,6 +55,7 @@ internal sealed class SqliteSessionJournalAdapter : ISessionJournal
         {
             await using var connection = new SqliteConnection(_connectionString);
             await connection.OpenAsync(cancellation);
+            await BackupBeforeMigrationAsync(connection, cancellation);
             await using var schema = connection.CreateCommand();
             schema.CommandText = """
                 PRAGMA journal_mode = WAL;
@@ -87,6 +91,9 @@ internal sealed class SqliteSessionJournalAdapter : ISessionJournal
                 """;
             await schema.ExecuteNonQueryAsync(cancellation);
             await EnsureAnalyticsColumnsAsync(connection, cancellation);
+            await using var version = connection.CreateCommand();
+            version.CommandText = $"PRAGMA user_version = {CurrentSchemaVersion};";
+            await version.ExecuteNonQueryAsync(cancellation);
 
             await using var insert = connection.CreateCommand();
             insert.CommandText = """
@@ -96,7 +103,7 @@ internal sealed class SqliteSessionJournalAdapter : ISessionJournal
             insert.Parameters.AddWithValue("$session", sessionId.ToString());
             insert.Parameters.AddWithValue("$started", startedAt.ToString("O"));
             insert.Parameters.AddWithValue("$kind", start.ClassroomKind.ToString());
-            insert.Parameters.AddWithValue("$seconds", (long)start.PlannedDuration.TotalSeconds);
+            insert.Parameters.AddWithValue("$seconds", (long)(start.ReminderAfter?.TotalSeconds ?? 0));
             await insert.ExecuteNonQueryAsync(cancellation);
         }
         finally
@@ -177,6 +184,59 @@ internal sealed class SqliteSessionJournalAdapter : ISessionJournal
         }
     }
 
+    private async Task BackupBeforeMigrationAsync(
+        SqliteConnection connection,
+        CancellationToken cancellation)
+    {
+        await using var version = connection.CreateCommand();
+        version.CommandText = "PRAGMA user_version;";
+        var current = Convert.ToInt32(await version.ExecuteScalarAsync(cancellation));
+        if (current >= CurrentSchemaVersion || !await HasSessionsTableAsync(connection, cancellation))
+        {
+            return;
+        }
+
+        var backupPath = $"{_databasePath}.backup-v{current}-{DateTime.UtcNow:yyyyMMddHHmmss}.db";
+        var backupConnectionString = new SqliteConnectionStringBuilder
+        {
+            DataSource = backupPath,
+            Mode = SqliteOpenMode.ReadWriteCreate
+        }.ToString();
+        await using (var backup = new SqliteConnection(backupConnectionString))
+        {
+            await backup.OpenAsync(cancellation);
+            connection.BackupDatabase(backup);
+        }
+
+        var directory = Path.GetDirectoryName(_databasePath);
+        var name = Path.GetFileName(_databasePath) + ".backup-";
+        if (directory is null || !Directory.Exists(directory))
+        {
+            return;
+        }
+
+        foreach (var obsolete in Directory.GetFiles(directory, name + "*.db")
+                     .OrderByDescending(File.GetLastWriteTimeUtc)
+                     .Skip(2))
+        {
+            try
+            {
+                File.Delete(obsolete);
+            }
+            catch (IOException)
+            {
+            }
+        }
+    }
+
+    private static async Task<bool> HasSessionsTableAsync(
+        SqliteConnection connection,
+        CancellationToken cancellation)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='sessions';";
+        return Convert.ToInt32(await command.ExecuteScalarAsync(cancellation)) > 0;
+    }
     private static async Task EnsureAnalyticsColumnsAsync(
         SqliteConnection connection,
         CancellationToken cancellation)
@@ -289,7 +349,7 @@ public static class SessionCsvExporter
     {
         var connectionString = new SqliteConnectionStringBuilder
         {
-            DataSource = databasePath,
+            DataSource = Path.GetFullPath(databasePath),
             Mode = SqliteOpenMode.ReadOnly
         }.ToString();
 

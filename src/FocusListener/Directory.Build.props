@@ -1,6 +1,0 @@
-<Project>
-  <Import Project="..\..\Directory.Build.props" />
-  <PropertyGroup>
-    <DefaultItemExcludes>$(DefaultItemExcludes);LiveTranscriptionCollector.cs;ProductionFocusDiagnostics.Fixed.cs</DefaultItemExcludes>
-  </PropertyGroup>
-</Project>

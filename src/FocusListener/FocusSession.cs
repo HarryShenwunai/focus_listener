@@ -10,6 +10,7 @@ internal sealed class FocusSession : IFocusSession
     private readonly SessionTiming _timing;
     private readonly Channel<SessionMessage> _mailbox;
     private readonly Dictionary<IntentId, IntentOutcome> _intentResults = [];
+    private readonly TaskCompletionSource _captureStopped = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     private int _runState;
     private volatile bool _running;
@@ -26,6 +27,7 @@ internal sealed class FocusSession : IFocusSession
     private string? _notice;
     private SessionSummary? _summary;
     private byte? _attentionRating;
+    private bool _reminderIssued;
     private int _questionsShown;
     private int _questionsQueued;
     private int _capacityDrops;
@@ -57,9 +59,9 @@ internal sealed class FocusSession : IFocusSession
         CancellationToken cancellation)
     {
         ArgumentNullException.ThrowIfNull(views);
-        if (start.PlannedDuration < TimeSpan.FromMinutes(10) || start.PlannedDuration > TimeSpan.FromMinutes(15))
+        if (start.ReminderAfter is { } reminder && (reminder < TimeSpan.FromMinutes(5) || reminder > TimeSpan.FromHours(12)))
         {
-            throw new ArgumentOutOfRangeException(nameof(start), "A Focus Session must be planned for 10–15 minutes.");
+            throw new ArgumentOutOfRangeException(nameof(start), "A session reminder must be between 5 minutes and 12 hours.");
         }
 
         if (Interlocked.CompareExchange(ref _runState, 1, 0) != 0)
@@ -74,8 +76,8 @@ internal sealed class FocusSession : IFocusSession
         _views = views;
         _surface = SessionSurfaceKind.Listening;
         _notice = _timing.Warmup > TimeSpan.Zero
-            ? $"正在监听课堂内容，约 {_timing.Warmup.TotalSeconds:0} 秒后开始自动提问。"
-            : "正在监听课堂内容。";
+            ? T($"正在监听课堂内容，约 {_timing.Warmup.TotalSeconds:0} 秒后开始自动提问。", $"Listening to the lesson. Automatic questions begin in about {_timing.Warmup.TotalSeconds:0} seconds.")
+            : T("正在监听课堂内容。", "Listening to the lesson.");
 
         using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
         _running = true;
@@ -116,7 +118,7 @@ internal sealed class FocusSession : IFocusSession
         ArgumentNullException.ThrowIfNull(intent);
         if (!_running)
         {
-            return IntentOutcome.Reject("NotRunning", "课堂会话尚未开始或已经结束。");
+            return IntentOutcome.Reject("NotRunning", T("课堂会话尚未开始或已经结束。", "The lesson session has not started or has already ended."));
         }
 
         var completion = new TaskCompletionSource<IntentOutcome>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -127,7 +129,7 @@ internal sealed class FocusSession : IFocusSession
         }
         catch (ChannelClosedException)
         {
-            return IntentOutcome.Reject("NotRunning", "课堂会话已经结束。");
+            return IntentOutcome.Reject("NotRunning", T("课堂会话已经结束。", "The lesson session has ended."));
         }
     }
 
@@ -147,8 +149,11 @@ internal sealed class FocusSession : IFocusSession
         {
             await _mailbox.Writer.WriteAsync(new SourceFaultMessage(exception), cancellation);
         }
+        finally
+        {
+            _captureStopped.TrySetResult();
+        }
     }
-
     private async Task PumpSourceStatusAsync(CancellationToken cancellation)
     {
         if (_source is not IQuestionCandidateSourceStatus statusSource)
@@ -206,7 +211,7 @@ internal sealed class FocusSession : IFocusSession
                 break;
             case SourceFaultMessage fault:
                 _health = SessionHealth.Degraded;
-                _notice = "题目生成暂不可用，监听仍在继续。";
+                _notice = T("题目生成暂不可用，监听仍在继续。", "Question generation is temporarily unavailable. Listening continues.");
                 await JournalAsync("CandidateSourceDegraded", new { fault.Exception.Message }, cancellation);
                 Publish();
                 break;
@@ -231,7 +236,7 @@ internal sealed class FocusSession : IFocusSession
         }
         catch (Exception exception)
         {
-            outcome = IntentOutcome.Reject("InternalError", "操作未完成，课堂会话仍在运行。");
+            outcome = IntentOutcome.Reject("InternalError", T("操作未完成，课堂会话仍在运行。", "The action did not complete. The lesson session is still running."));
             await JournalAsync("IntentFailed", new { Intent = message.Intent.GetType().Name, exception.Message }, cancellation);
         }
 
@@ -252,7 +257,7 @@ internal sealed class FocusSession : IFocusSession
             EndSession => await HandleEndSessionAsync(cancellation),
             RateAttentionReset rating => await HandleRatingAsync(rating.Rating, cancellation),
             SkipAttentionRating => await HandleRatingAsync(null, cancellation),
-            _ => IntentOutcome.Reject("UnknownIntent", "未知操作。")
+            _ => IntentOutcome.Reject("UnknownIntent", T("未知操作。", "Unknown action."))
         };
     }
 
@@ -260,12 +265,12 @@ internal sealed class FocusSession : IFocusSession
     {
         if (_surface is SessionSurfaceKind.AttentionRating or SessionSurfaceKind.Completed or SessionSurfaceKind.Failed)
         {
-            return IntentOutcome.Reject("NotListening", "课堂收音已经停止。");
+            return IntentOutcome.Reject("NotListening", T("课堂收音已经停止。", "Lesson audio capture has stopped."));
         }
 
         if (_current is not null)
         {
-            _notice = "请先处理当前题目。";
+            _notice = T("请先处理当前题目。", "Finish the current question first.");
             Publish();
             return IntentOutcome.Reject("ProcessingCurrentQuestion", _notice);
         }
@@ -286,13 +291,13 @@ internal sealed class FocusSession : IFocusSession
 
         if (candidate is null)
         {
-            _notice = "暂时没有完整、可复述的知识点。";
+            _notice = T("暂时没有完整、可复述的知识点。", "There is no complete, restatable knowledge point yet.");
             Publish();
             return IntentOutcome.Reject("NoEligibleUnit", _notice);
         }
 
         await ShowQuestionAsync(candidate, cancellation);
-        return IntentOutcome.Accept("ManualTriggerAccepted", "已根据最近的合格知识点生成问题。");
+        return IntentOutcome.Accept("ManualTriggerAccepted", T("已根据最近的合格知识点生成问题。", "A question was created from the latest eligible knowledge point."));
     }
 
     private async ValueTask AdmitAsync(ResetQuestionCandidate candidate, CancellationToken cancellation)
@@ -327,7 +332,7 @@ internal sealed class FocusSession : IFocusSession
                 return;
             case CandidateAdmissionKind.LowerPriority:
                 _capacityDrops++;
-                _notice = "新知识点因候选容量已满而跳过。";
+                _notice = T("新知识点因候选容量已满而跳过。", "A new knowledge point was skipped because the candidate pool is full.");
                 await JournalAsync("CandidateDropped", new { candidate.EligibleUnitId, Reason = "LowerPriority" }, cancellation);
                 Publish();
                 return;
@@ -342,7 +347,7 @@ internal sealed class FocusSession : IFocusSession
             return;
         }
 
-        _notice = "题目已准备。";
+        _notice = T("题目已准备。", "A question is ready.");
         Publish();
     }
 
@@ -374,7 +379,7 @@ internal sealed class FocusSession : IFocusSession
         };
         _surface = SessionSurfaceKind.Question;
         _questionsShown++;
-        _notice = candidate.Trigger == TriggerKind.Manual ? "手动复位题已生成。" : null;
+        _notice = candidate.Trigger == TriggerKind.Manual ? T("手动复位题已生成。", "A manual reset question is ready.") : null;
         await JournalAsync("QuestionShown", new
         {
             candidate.EligibleUnitId,
@@ -398,23 +403,23 @@ internal sealed class FocusSession : IFocusSession
     {
         if (_current is null || _current.Candidate.Question.Id != answer.Question)
         {
-            return IntentOutcome.Reject("StaleQuestion", "这道题已经不是当前题。");
+            return IntentOutcome.Reject("StaleQuestion", T("这道题已经不是当前题。", "This is no longer the current question."));
         }
 
         if (_current.Phase == CurrentQuestionPhase.Pending)
         {
-            return IntentOutcome.Reject("OpenPendingFirst", "请先打开待答题。");
+            return IntentOutcome.Reject("OpenPendingFirst", T("请先打开待答题。", "Open the pending question first."));
         }
 
         if (_current.Phase is not CurrentQuestionPhase.Active and not CurrentQuestionPhase.PendingOpen)
         {
-            return IntentOutcome.Reject("NotAnswerable", "当前状态不能作答。");
+            return IntentOutcome.Reject("NotAnswerable", T("当前状态不能作答。", "The question cannot be answered in the current state."));
         }
 
         var selected = _current.Candidate.Question.Choices.FirstOrDefault(choice => choice.Id == answer.Choice);
         if (selected is null)
         {
-            return IntentOutcome.Reject("UnknownChoice", "该选项不属于当前题。");
+            return IntentOutcome.Reject("UnknownChoice", T("该选项不属于当前题。", "That choice does not belong to the current question."));
         }
 
         var now = _clock.UtcNow;
@@ -444,24 +449,24 @@ internal sealed class FocusSession : IFocusSession
             ElapsedMilliseconds = (long)(now - _current.ShownAt).TotalMilliseconds
         }, cancellation);
         Publish();
-        return IntentOutcome.Accept("AnswerAccepted", isCorrect ? "回答正确。" : "回答错误。");
+        return IntentOutcome.Accept("AnswerAccepted", isCorrect ? T("回答正确。", "Correct.") : T("回答错误。", "Incorrect."));
     }
 
     private async ValueTask<IntentOutcome> HandleExtendAsync(ExtendThinking extend, CancellationToken cancellation)
     {
         if (_current is null || _current.Candidate.Question.Id != extend.Question)
         {
-            return IntentOutcome.Reject("StaleQuestion", "这道题已经不是当前题。");
+            return IntentOutcome.Reject("StaleQuestion", T("这道题已经不是当前题。", "This is no longer the current question."));
         }
 
         if (_current.Phase != CurrentQuestionPhase.Active)
         {
-            return IntentOutcome.Reject("NotActive", "只有活动答题卡可以延长。");
+            return IntentOutcome.Reject("NotActive", T("只有活动答题卡可以延长。", "Only an active question can be extended."));
         }
 
         if (_current.Extended)
         {
-            return IntentOutcome.Reject("AlreadyExtended", "每道题只能延长一次。");
+            return IntentOutcome.Reject("AlreadyExtended", T("每道题只能延长一次。", "Each question can be extended once."));
         }
 
         _current.Extended = true;
@@ -469,19 +474,19 @@ internal sealed class FocusSession : IFocusSession
         await JournalAsync("QuestionExtended", new { Question = extend.Question.ToString(), _current.Deadline }, cancellation);
         Publish();
         var added = Math.Max(0, (_timing.ExtendedAnswerWindow - _timing.InitialAnswerWindow).TotalSeconds);
-        return IntentOutcome.Accept("Extended", $"答题时间已延长 {added:0} 秒。");
+        return IntentOutcome.Accept("Extended", T($"答题时间已延长 {added:0} 秒。", $"Answer time extended by {added:0} seconds."));
     }
 
     private IntentOutcome HandleOpenPending(OpenPending open)
     {
         if (_current is null || _current.Candidate.Question.Id != open.Question || _current.Phase != CurrentQuestionPhase.Pending)
         {
-            return IntentOutcome.Reject("NoPendingQuestion", "当前没有这道待答题。");
+            return IntentOutcome.Reject("NoPendingQuestion", T("当前没有这道待答题。", "That pending question is not available."));
         }
 
         _current.Phase = CurrentQuestionPhase.PendingOpen;
         _surface = SessionSurfaceKind.Question;
-        _notice = "待答题已打开，原失效时间不变。";
+        _notice = T("待答题已打开，原失效时间不变。", "Pending question opened; its expiry time is unchanged.");
         Publish();
         return IntentOutcome.Accept("PendingOpened", _notice);
     }
@@ -490,14 +495,14 @@ internal sealed class FocusSession : IFocusSession
     {
         if (_current is null || _current.Candidate.Question.Id != collapse.Question || _current.Phase != CurrentQuestionPhase.PendingOpen)
         {
-            return IntentOutcome.Reject("NotPendingOpen", "当前没有已打开的待答题。");
+            return IntentOutcome.Reject("NotPendingOpen", T("当前没有已打开的待答题。", "No pending question is currently open."));
         }
 
         _current.Phase = CurrentQuestionPhase.Pending;
         _surface = SessionSurfaceKind.PendingBadge;
         _notice = null;
         Publish();
-        return IntentOutcome.Accept("PendingCollapsed", "待答题已折叠。");
+        return IntentOutcome.Accept("PendingCollapsed", T("待答题已折叠。", "Pending question collapsed."));
     }
 
     private async ValueTask<IntentOutcome> HandleQuestionIssueAsync(ReportQuestionIssue issue, CancellationToken cancellation)
@@ -505,7 +510,7 @@ internal sealed class FocusSession : IFocusSession
         if (_current is null || _current.Candidate.Question.Id != issue.Question ||
             _current.Phase is CurrentQuestionPhase.Feedback)
         {
-            return IntentOutcome.Reject("StaleQuestion", "当前没有可报告的这道题。");
+            return IntentOutcome.Reject("StaleQuestion", T("当前没有可报告的这道题。", "That question is no longer available to report."));
         }
 
         _invalidQuestions++;
@@ -515,46 +520,47 @@ internal sealed class FocusSession : IFocusSession
             Subject = _current.Candidate.Subject,
             KnowledgeType = _current.Candidate.Question.Type.ToString()
         }, cancellation);
-        await CloseCurrentAsync("题目有误已记录，继续监听。", cancellation);
-        return IntentOutcome.Accept("QuestionReportedInvalid", "已记录题目有误，不会重新生成。");
+        await CloseCurrentAsync(T("题目有误已记录，继续监听。", "Question issue recorded. Listening continues."), cancellation);
+        return IntentOutcome.Accept("QuestionReportedInvalid", T("已记录题目有误，不会重新生成。", "Question issue recorded; it will not be regenerated."));
     }
 
     private async ValueTask<IntentOutcome> HandleEndSessionAsync(CancellationToken cancellation)
     {
         if (_surface is SessionSurfaceKind.AttentionRating or SessionSurfaceKind.Completed)
         {
-            return IntentOutcome.Reject("AlreadyEnding", "课堂会话已经停止。");
+            return IntentOutcome.Reject("AlreadyEnding", T("课堂会话已经停止。", "The lesson session has already stopped."));
         }
 
         _captureLifetime?.Cancel();
+        await _captureStopped.Task.WaitAsync(cancellation);
         _current = null;
         _scheduler!.Clear();
         _surface = SessionSurfaceKind.AttentionRating;
-        _notice = "请评价这些问题对拉回注意力的帮助。";
+        _notice = T("请评价这些问题对拉回注意力的帮助。", "Rate how much these questions helped bring your attention back.");
         await JournalAsync("CaptureStopped", new { RollingTranscriptCleared = true }, cancellation);
         Publish();
-        return IntentOutcome.Accept("SessionEnding", "收音已停止。");
+        return IntentOutcome.Accept("SessionEnding", T("收音已停止。", "Audio capture stopped."));
     }
 
     private async ValueTask<IntentOutcome> HandleRatingAsync(byte? rating, CancellationToken cancellation)
     {
         if (_surface != SessionSurfaceKind.AttentionRating)
         {
-            return IntentOutcome.Reject("NotAwaitingRating", "当前不需要注意力评价。");
+            return IntentOutcome.Reject("NotAwaitingRating", T("当前不需要注意力评价。", "An attention rating is not needed right now."));
         }
 
         if (rating is < 1 or > 5)
         {
-            return IntentOutcome.Reject("InvalidRating", "评价必须在 1–5 之间。");
+            return IntentOutcome.Reject("InvalidRating", T("评价必须在 1–5 之间。", "The rating must be between 1 and 5."));
         }
 
         _attentionRating = rating;
         _summary = BuildSummary(_clock.UtcNow);
         _surface = SessionSurfaceKind.Completed;
-        _notice = "课堂会话已完成。";
+        _notice = T("课堂会话已完成。", "Lesson session completed.");
         await _journal.CompleteAsync(_summary, cancellation);
         Publish();
-        return IntentOutcome.Accept("SessionCompleted", "课堂会话已完成。");
+        return IntentOutcome.Accept("SessionCompleted", T("课堂会话已完成。", "Lesson session completed."));
     }
 
     private async ValueTask HandleTickAsync(DateTimeOffset now, CancellationToken cancellation)
@@ -564,6 +570,19 @@ internal sealed class FocusSession : IFocusSession
             await JournalAsync("CandidateExpired", new { expired.EligibleUnitId }, cancellation);
         }
 
+        if (!_reminderIssued &&
+            _current is null &&
+            _start?.ReminderAfter is { } reminder &&
+            now - _startedAt >= reminder)
+        {
+            _reminderIssued = true;
+            _notice = ProductText.Choose(
+                $"已监听 {reminder.TotalMinutes:0} 分钟；课堂会继续，结束时请点击“结束课堂”。",
+                $"Listening for {reminder.TotalMinutes:0} minutes. The session will continue until you choose End session.");
+            await JournalAsync("SessionReminderShown", new { Minutes = (int)reminder.TotalMinutes }, cancellation);
+            Publish();
+            return;
+        }
         if (_current is null)
         {
             if (!await TryShowAutomaticAsync(now, cancellation))
@@ -578,7 +597,7 @@ internal sealed class FocusSession : IFocusSession
             _current.Phase = CurrentQuestionPhase.Pending;
             _current.PendingExpiresAt = now + _timing.PendingLifetime;
             _surface = SessionSurfaceKind.PendingBadge;
-            _notice = "题目已折叠为待答徽标。";
+            _notice = T("题目已折叠为待答徽标。", "The question was collapsed into a pending badge.");
             await JournalAsync("QuestionBecamePending", new
             {
                 Question = _current.Candidate.Question.Id.ToString(),
@@ -592,7 +611,7 @@ internal sealed class FocusSession : IFocusSession
             _current.PendingExpiresAt <= now)
         {
             await JournalAsync("PendingQuestionExpired", new { Question = _current.Candidate.Question.Id.ToString() }, cancellation);
-            await CloseCurrentAsync("待答题已过期，继续监听。", cancellation);
+            await CloseCurrentAsync(T("待答题已过期，继续监听。", "The pending question expired. Listening continues."), cancellation);
             return;
         }
 
@@ -634,6 +653,8 @@ internal sealed class FocusSession : IFocusSession
         Trigger = candidate.Trigger.ToString(),
         candidate.RecognizedAt
     };
+
+    private static string T(string zh, string en) => ProductText.Choose(zh, en);
 
     private SessionSummary BuildSummary(DateTimeOffset completedAt) => new(
         _sessionId,

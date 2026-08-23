@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="Focus Listener">
+  <rect width="256" height="256" rx="56" fill="#173E2D"/>
+  <circle cx="128" cy="128" r="78" fill="none" stroke="#72D09F" stroke-width="18"/>
+  <circle cx="128" cy="128" r="43" fill="none" stroke="#E4F3EB" stroke-width="14"/>
+  <circle cx="128" cy="128" r="14" fill="#FFFFFF"/>
+  <path d="M194 91c14 21 14 53 0 74" fill="none" stroke="#49A777" stroke-width="12" stroke-linecap="round"/>
+</svg>

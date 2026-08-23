@@ -16,5 +16,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\FocusListener\FocusListener.csproj" />
+    <ProjectReference Include="..\..\src\FocusListener.App\FocusListener.App.csproj" />
   </ItemGroup>
 </Project>

@@ -7,6 +7,11 @@ public sealed record FocusInteractionSettings
     public int WarmupSeconds { get; init; } = 60;
     public int AutoCooldownSeconds { get; init; } = 120;
     public int CandidateLifetimeSeconds { get; init; } = 180;
+    public AppLanguage AppLanguage { get; init; } = AppLanguage.System;
+    public bool OnboardingCompleted { get; init; }
+    public bool UsageNoticeAccepted { get; init; }
+    public int? SessionReminderMinutes { get; init; }
+    public int RetentionDays { get; init; } = 30;
     public int ManualSafetySeconds { get; init; } = 30;
     public int InitialAnswerSeconds { get; init; } = 8;
     public int ExtendedAnswerSeconds { get; init; } = 20;
@@ -36,57 +41,72 @@ public sealed record FocusInteractionSettings
     public IReadOnlyList<string> Validate()
     {
         var errors = new List<string>();
-        InRange(WarmupSeconds, 0, 300, "首次自动提问等待", errors);
-        InRange(AutoCooldownSeconds, 30, 600, "自动提问间隔", errors);
-        InRange(CandidateLifetimeSeconds, 30, 900, "知识点保留时间", errors);
-        InRange(ManualSafetySeconds, 0, 120, "手动题后缓冲", errors);
-        InRange(InitialAnswerSeconds, 5, 30, "初始答题时间", errors);
-        InRange(ExtendedAnswerSeconds, 6, 60, "延长后总答题时间", errors);
-        InRange(PendingLifetimeSeconds, 30, 600, "待答题保留时间", errors);
-        InRange(FeedbackSeconds, 1, 10, "反馈显示时间", errors);
+        InRange(WarmupSeconds, 0, 300, T("首次自动提问等待", "First automatic question delay"), errors);
+        InRange(AutoCooldownSeconds, 30, 600, T("自动提问间隔", "Automatic question interval"), errors);
+        InRange(CandidateLifetimeSeconds, 30, 900, T("知识点保留时间", "Knowledge point lifetime"), errors);
+        InRange(ManualSafetySeconds, 0, 120, T("手动题后缓冲", "Post-manual buffer"), errors);
+        InRange(InitialAnswerSeconds, 5, 30, T("初始答题时间", "Initial answer time"), errors);
+        InRange(ExtendedAnswerSeconds, 6, 60, T("延长后总答题时间", "Extended total answer time"), errors);
+        InRange(PendingLifetimeSeconds, 30, 600, T("待答题保留时间", "Pending question lifetime"), errors);
+        InRange(FeedbackSeconds, 1, 10, T("反馈显示时间", "Feedback duration"), errors);
+
+        if (!Enum.IsDefined(AppLanguage))
+        {
+            errors.Add(T("请选择有效的界面语言。", "Choose a valid interface language."));
+        }
+
+        if (!SessionReminderOptions.IsValid(SessionReminderMinutes))
+        {
+            errors.Add(T("课堂提醒只能选择关闭、15、30、45 或 60 分钟。", "Lesson reminder must be Off, 15, 30, 45, or 60 minutes."));
+        }
+
+        if (RetentionDays is < 1 or > 365)
+        {
+            errors.Add(T("本地分析数据保留时间应在 1–365 天之间。", "Local analytics retention must be between 1 and 365 days."));
+        }
 
         if (!Enum.IsDefined(AudioMode))
         {
-            errors.Add("请选择有效的音频工作模式。");
+            errors.Add(T("请选择有效的音频工作模式。", "Choose a valid audio mode."));
         }
 
         if (SubtitleBackgroundOpacity is < 0.25 or > 0.9)
         {
-            errors.Add("字幕背景透明度应在 25%–90% 之间。");
+            errors.Add(T("字幕背景透明度应在 25%–90% 之间。", "Subtitle background opacity must be between 25% and 90%."));
         }
 
         if (SubtitleFontSize is < 18 or > 54)
         {
-            errors.Add("字幕字号应在 18–54 之间。");
+            errors.Add(T("字幕字号应在 18–54 之间。", "Subtitle font size must be between 18 and 54."));
         }
 
         if (SubtitleWidth is < 360 or > 2400 || SubtitleHeight is < 90 or > 600)
         {
-            errors.Add("字幕窗口大小超出可用范围。");
+            errors.Add(T("字幕窗口大小超出可用范围。", "Subtitle window size is outside the supported range."));
         }
 
-        ValidateShortcut(SubtitleToggleKey, "显示/隐藏字幕快捷键", errors);
-        ValidateShortcut(SubtitleLockKey, "锁定/解锁字幕快捷键", errors);
+        ValidateShortcut(SubtitleToggleKey, T("显示/隐藏字幕快捷键", "Subtitle visibility shortcut"), errors);
+        ValidateShortcut(SubtitleLockKey, T("锁定/解锁字幕快捷键", "Subtitle lock shortcut"), errors);
         var subtitleToggleKey = SubtitleToggleKey?.Trim();
         var subtitleLockKey = SubtitleLockKey?.Trim();
         if (string.Equals(subtitleToggleKey, subtitleLockKey, StringComparison.OrdinalIgnoreCase))
         {
-            errors.Add("两个字幕快捷键不能使用同一个字母。");
+            errors.Add(T("两个字幕快捷键不能使用同一个字母。", "Subtitle shortcuts must use different letters."));
         }
         if (string.Equals(subtitleToggleKey, "Q", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(subtitleLockKey, "Q", StringComparison.OrdinalIgnoreCase))
         {
-            errors.Add("字幕快捷键不能使用 Q，因为 Ctrl + Shift + Q 已用于立即提问。");
+            errors.Add(T("字幕快捷键不能使用 Q，因为 Ctrl + Shift + Q 已用于立即提问。", "Subtitle shortcuts cannot use Q because Ctrl + Shift + Q asks a question."));
         }
 
         if (CandidateLifetimeSeconds < AutoCooldownSeconds + 30)
         {
-            errors.Add("知识点保留时间至少要比自动提问间隔多 30 秒。");
+            errors.Add(T("知识点保留时间至少要比自动提问间隔多 30 秒。", "Knowledge point lifetime must exceed the automatic interval by at least 30 seconds."));
         }
 
         if (ExtendedAnswerSeconds <= InitialAnswerSeconds)
         {
-            errors.Add("延长后的总答题时间必须大于初始答题时间。");
+            errors.Add(T("延长后的总答题时间必须大于初始答题时间。", "Extended total answer time must exceed the initial answer time."));
         }
 
         return errors;
@@ -116,11 +136,13 @@ public sealed record FocusInteractionSettings
         };
     }
 
+    private static string T(string zh, string en) => ProductText.Choose(zh, en);
+
     private static void InRange(int value, int minimum, int maximum, string name, ICollection<string> errors)
     {
         if (value < minimum || value > maximum)
         {
-            errors.Add($"{name}应在 {minimum}–{maximum} 秒之间。");
+            errors.Add(T($"{name}应在 {minimum}–{maximum} 秒之间。", $"{name} must be between {minimum} and {maximum} seconds."));
         }
     }
 
@@ -130,7 +152,7 @@ public sealed record FocusInteractionSettings
         if (normalized.Length != 1 ||
             (normalized[0] is < 'A' or > 'Z') && (normalized[0] is < 'a' or > 'z'))
         {
-            errors.Add($"{name}应填写一个英文字母。");
+            errors.Add(T($"{name}应填写一个英文字母。", $"{name} must be one English letter."));
         }
     }
 }
@@ -218,6 +240,8 @@ public static class FocusDataMaintenance
             "FocusListener"));
         var database = RequireInside(applicationRoot, databasePath);
         var diagnostics = RequireInside(applicationRoot, diagnosticsDirectory);
+        var logs = RequireInside(applicationRoot, Path.Combine(applicationRoot, "logs"));
+        var crash = RequireInside(applicationRoot, Path.Combine(applicationRoot, "last-crash.json"));
 
         foreach (var path in new[] { database, database + "-wal", database + "-shm" })
         {
@@ -227,9 +251,28 @@ public static class FocusDataMaintenance
             }
         }
 
+        var databaseDirectory = Path.GetDirectoryName(database);
+        if (databaseDirectory is not null && Directory.Exists(databaseDirectory))
+        {
+            foreach (var backup in Directory.GetFiles(
+                         databaseDirectory,
+                         Path.GetFileName(database) + ".backup-*.db"))
+            {
+                File.Delete(backup);
+            }
+        }
+
         if (Directory.Exists(diagnostics))
         {
             Directory.Delete(diagnostics, true);
+        }
+        if (Directory.Exists(logs))
+        {
+            Directory.Delete(logs, true);
+        }
+        if (File.Exists(crash))
+        {
+            File.Delete(crash);
         }
 
         return Task.CompletedTask;
@@ -241,7 +284,7 @@ public static class FocusDataMaintenance
         var fullPath = Path.GetFullPath(path);
         if (!fullPath.StartsWith(fullRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
         {
-            throw new InvalidOperationException("只能清除 Focus Listener 自己的本地数据。");
+            throw new InvalidOperationException(ProductText.Choose("只能清除 Focus Listener 自己的本地数据。", "Only Focus Listener local data can be cleared."));
         }
 
         return fullPath;

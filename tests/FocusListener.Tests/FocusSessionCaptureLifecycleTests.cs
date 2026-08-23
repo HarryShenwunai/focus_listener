@@ -23,7 +23,12 @@ public sealed class FocusSessionCaptureLifecycleTests
         await views.WaitForAsync(view => view.Surface == SessionSurfaceKind.Listening, timeout.Token);
         await source.Started.Task.WaitAsync(timeout.Token);
 
-        var ending = await session.ApplyAsync(new EndSession(IntentId.New()), timeout.Token);
+        var endingTask = session.ApplyAsync(new EndSession(IntentId.New()), timeout.Token).AsTask();
+        await source.CancellationRequested.Task.WaitAsync(timeout.Token);
+        await Task.Delay(100, timeout.Token);
+        Assert.False(endingTask.IsCompleted);
+        source.AllowStop.SetResult();
+        var ending = await endingTask;
         await source.CaptureStopped.Task.WaitAsync(timeout.Token);
 
         Assert.True(ending.Accepted);
@@ -39,13 +44,15 @@ public sealed class FocusSessionCaptureLifecycleTests
     private sealed class CaptureAwareSource : IQuestionCandidateSource
     {
         public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource CancellationRequested { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource AllowStop { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource CaptureStopped { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public async IAsyncEnumerable<ResetQuestionCandidate> AutomaticAsync(
             SessionStart start,
             [EnumeratorCancellation] CancellationToken cancellation)
         {
-            using var registration = cancellation.Register(CaptureStopped.SetResult);
+            using var registration = cancellation.Register(CancellationRequested.SetResult);
             Started.SetResult();
             try
             {
@@ -55,6 +62,8 @@ public sealed class FocusSessionCaptureLifecycleTests
             {
             }
 
+            await AllowStop.Task;
+            CaptureStopped.SetResult();
             yield break;
         }
 

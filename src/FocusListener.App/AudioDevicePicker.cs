@@ -45,22 +45,22 @@ internal sealed class AudioDevicePicker : IDisposable
     public UIElement Build()
     {
         var root = new StackPanel();
-        root.Children.Add(Field("音频工作模式", _mode, "自动会采用声音更清晰的一路；智能混合会优先排除扬声器重复声。"));
-        root.Children.Add(Field("麦克风设备", _microphone, "请选择你实际说话时使用的麦克风。"));
-        root.Children.Add(Field("系统播放设备", _systemOutput, "请选择正在播放网课、视频或课件声音的输出设备。"));
+        root.Children.Add(Field(T("音频工作模式", "Audio mode"), _mode, T("自动会采用声音更清晰的一路；智能混合会优先排除扬声器重复声。", "Automatic uses the clearer route; Smart mix avoids duplicated speaker audio.")));
+        root.Children.Add(Field(T("麦克风设备", "Microphone"), _microphone, T("请选择你实际说话时使用的麦克风。", "Choose the microphone you actually use.")));
+        root.Children.Add(Field(T("系统播放设备", "System output"), _systemOutput, T("请选择正在播放网课、视频或课件声音的输出设备。", "Choose the output device playing the lesson or video.")));
 
         var actions = new StackPanel
         {
             Orientation = Orientation.Horizontal,
             Margin = new Thickness(0, 10, 0, 0)
         };
-        var refresh = Button("刷新设备");
+        var refresh = Button(T("刷新设备", "Refresh devices"));
         refresh.Click += (_, _) => RefreshDevices(
             _microphone.SelectedValue as string,
             _systemOutput.SelectedValue as string,
             announce: true);
         actions.Children.Add(refresh);
-        var tone = Button("播放轻柔测试音");
+        var tone = Button(T("播放轻柔测试音", "Play gentle test tone"));
         tone.Margin = new Thickness(8, 0, 0, 0);
         tone.Click += PlayTone_Click;
         actions.Children.Add(tone);
@@ -203,8 +203,8 @@ internal sealed class AudioDevicePicker : IDisposable
         _lastDeviceFingerprint = string.Join('|', snapshot.Microphones.Select(item => item.Id)) + "::" +
                                  string.Join('|', snapshot.SystemOutputs.Select(item => item.Id));
         _message.Text = snapshot.Error ?? (announce
-            ? $"设备列表已刷新 · 麦克风 {snapshot.Microphones.Count} 个 / 系统输出 {snapshot.SystemOutputs.Count} 个"
-            : "设备插拔后会自动刷新；不会擅自切换当前选择。");
+            ? T($"设备列表已刷新 · 麦克风 {snapshot.Microphones.Count} 个 / 系统输出 {snapshot.SystemOutputs.Count} 个", $"Devices refreshed · {snapshot.Microphones.Count} microphone(s) / {snapshot.SystemOutputs.Count} output(s)")
+            : T("设备插拔后会自动刷新；不会擅自切换当前选择。", "The list refreshes after device changes without silently switching your selection."));
     }
 
     private static IReadOnlyList<AudioDeviceInfo> WithMissing(
@@ -219,7 +219,7 @@ internal sealed class AudioDevicePicker : IDisposable
 
         return
         [
-            new AudioDeviceInfo(selectedId, selectedName ?? "上次选择的设备", false, false),
+            new AudioDeviceInfo(selectedId, selectedName ?? T("上次选择的设备", "Previously selected device"), false, false),
             .. devices
         ];
     }
@@ -245,20 +245,23 @@ internal sealed class AudioDevicePicker : IDisposable
         button.IsEnabled = false;
         try
         {
-            _message.Text = "1 秒后播放轻柔测试音…";
+            _message.Text = T("1 秒后播放轻柔测试音…", "A gentle test tone will play in 1 second…");
             await Task.Delay(TimeSpan.FromSeconds(1));
             await WindowsAudioDevices.PlayTestToneAsync(_systemOutput.SelectedValue as string);
-            _message.Text = "测试音播放完成。系统检测会确认软件能否同时捕获它。";
+            _message.Text = T("测试音播放完成。系统检测会确认软件能否同时捕获它。", "Test tone completed. System check can confirm whether it was captured.");
         }
         catch (Exception exception)
         {
-            _message.Text = $"测试音未播放：{exception.Message}";
+            ProductRuntime.Log("TestTonePlaybackFailed", exception);
+            _message.Text = T("测试音未播放，请确认输出设备后重试。", "The test tone did not play. Confirm the output device and retry.");
         }
         finally
         {
             button.IsEnabled = true;
         }
     }
+
+    private static string T(string zh, string en) => ProductText.Choose(zh, en);
 
     private sealed record ModeChoice(AudioCaptureMode Value, string Label);
 }

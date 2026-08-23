@@ -25,16 +25,19 @@ public partial class MainWindow : Window
     private SessionSummary? _summary;
     private HwndSource? _windowSource;
     private bool _registeredHotKey;
+    private string? _apiKey;
 
     public MainWindow()
     {
         InitializeComponent();
-        _databasePath = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "FocusListener",
-            "focus-listener.db");
+        _databasePath = ProductRuntime.DatabasePath;
         _countdownTimer = new DispatcherTimer(TimeSpan.FromMilliseconds(200), DispatcherPriority.Background,
             (_, _) => UpdateCountdown(), Dispatcher);
+        _countdownTimer.Start();
+        _apiKey = ReadConfiguredApiKey();
+        ModeLabel.Cursor = Cursors.Hand;
+        ModeLabel.MouseLeftButtonDown += ConfigureGemini_Click;
+        UpdateModeLabel();
     }
 
     private void Window_SourceInitialized(object? sender, EventArgs e)
@@ -44,6 +47,7 @@ public partial class MainWindow : Window
         _windowSource?.AddHook(WindowProcedure);
         _registeredHotKey = RegisterHotKey(handle, ManualTriggerHotKeyId,
             ModifierControl | ModifierShift, VirtualKeyQ);
+        RegisterExperienceHotKeysV3(handle);
     }
 
     private void Window_Loaded(object sender, RoutedEventArgs e)
@@ -51,42 +55,58 @@ public partial class MainWindow : Window
         var workArea = SystemParameters.WorkArea;
         Left = Math.Max(workArea.Left + 12, workArea.Right - ActualWidth - 22);
         Top = Math.Max(workArea.Top + 12, workArea.Bottom - ActualHeight - 22);
-        if (!_registeredHotKey)
-        {
-            StatusText.Text = "全局快捷键已被其他程序占用；仍可点击手动触发。";
-        }
+        UpdateModeLabel();
     }
 
-    private async void StartSession_Click(object sender, RoutedEventArgs e)
+    private async void ConfigureGemini_Click(object sender, MouseButtonEventArgs e)
     {
         if (_sessionTask is not null)
+        {
+            StatusText.Text = "请在下一次课堂开始前更改 Gemini 配置。";
+            return;
+        }
+
+        var dialog = new ApiKeyDialog(_apiKey) { Owner = this };
+        if (dialog.ShowDialog() != true)
         {
             return;
         }
 
-        StartPanel.Visibility = Visibility.Collapsed;
-        SessionFooter.Visibility = Visibility.Visible;
-        StatusText.Text = _registeredHotKey ? "快捷键：Ctrl + Shift + Q" : "模拟模式";
-        _session = FocusSessionFactory.CreateSimulation(_databasePath);
-        var progress = new Progress<SessionView>(Render);
-        _sessionTask = _session.RunAsync(
-            new SessionStart(ClassroomKind.ComputerPlayback, TimeSpan.FromMinutes(12)),
-            progress,
-            _lifetime.Token);
-
         try
         {
-            _summary = await _sessionTask;
-            RenderSummary(_summary);
-        }
-        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
-        {
+            if (dialog.ClearRequested)
+            {
+                WindowsCredentialStore.DeleteApiKey();
+                _apiKey = Environment.GetEnvironmentVariable("GEMINI_API_KEY");
+            }
+            else if (dialog.ApiKey is { } key)
+            {
+                StatusText.Text = T("正在验证 Gemini Key…", "Validating Gemini key…");
+                var validation = await GeminiCredentialValidator.ValidateAsync(new GeminiFocusOptions(key), _lifetime.Token);
+                if (!validation.IsValid)
+                {
+                    var message = validation.State switch
+                    {
+                        GeminiCredentialState.InvalidOrUnauthorized => T("Key 无效或没有模型权限。", "The key is invalid or unauthorized."),
+                        GeminiCredentialState.NetworkUnavailable => T("无法连接 Gemini，请检查网络后重试。", "Gemini could not be reached. Check the network and retry."),
+                        _ => T("模型或配额当前不可用，请在 AI Studio 检查后重试。", "The model or quota is unavailable. Check AI Studio and retry.")
+                    };
+                    MessageBox.Show(this, message, "Focus Listener", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return;
+                }
+
+                WindowsCredentialStore.WriteApiKey(key);
+                _apiKey = key;
+            }
+
+            UpdateModeLabel();
         }
         catch (Exception exception)
         {
-            ShowOnly(CompletedPanel);
-            SummaryText.Text = $"会话意外停止：{exception.Message}";
-            StatusText.Text = "错误";
+            ProductRuntime.Log("GeminiConfigurationSaveFailed", exception);
+            MessageBox.Show(this,
+                T("Gemini 配置未保存，请检查网络和 Windows 凭据权限后重试。", "Gemini configuration was not saved. Check the network and Windows Credential permissions, then retry."),
+                "Focus Listener", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
     }
 
@@ -99,7 +119,7 @@ public partial class MainWindow : Window
         }
 
         _view = view;
-        StatusText.Text = view.Notice ?? (view.Health == SessionHealth.Healthy ? "运行正常" : "题源暂时不可用");
+        StatusText.Text = view.Notice ?? (view.Health == SessionHealth.Healthy ? T("运行正常", "Running normally") : T("自动题源暂时不可用", "Automatic question source is temporarily unavailable"));
         EndButton.Visibility = view.Surface is SessionSurfaceKind.AttentionRating or SessionSurfaceKind.Completed
             ? Visibility.Collapsed
             : Visibility.Visible;
@@ -107,7 +127,7 @@ public partial class MainWindow : Window
         switch (view.Surface)
         {
             case SessionSurfaceKind.Listening:
-                ListeningNotice.Text = view.Notice ?? "等待出现适合复述的知识单元…";
+                ListeningNotice.Text = view.Notice ?? T("等待出现适合复述的知识单元…", "Waiting for a complete, restatable knowledge point…");
                 ShowOnly(ListeningPanel);
                 break;
             case SessionSurfaceKind.Question:
@@ -130,7 +150,7 @@ public partial class MainWindow : Window
                 break;
             case SessionSurfaceKind.Failed:
                 ShowOnly(CompletedPanel);
-                SummaryText.Text = view.Notice ?? "会话失败。";
+                SummaryText.Text = view.Notice ?? T("会话失败。", "The session failed.");
                 break;
         }
     }
@@ -142,7 +162,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        TriggerLabel.Text = view.Question.Trigger == TriggerKind.Automatic ? "自动复位题" : "手动复位题";
+        TriggerLabel.Text = view.Question.Trigger == TriggerKind.Automatic ? T("自动复位题", "Automatic reset question") : T("手动复位题", "Manual reset question");
         QuestionStem.Text = view.Question.Stem;
         var buttons = new[] { ChoiceA, ChoiceB, ChoiceC };
         for (var index = 0; index < buttons.Length; index++)
@@ -174,7 +194,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        FeedbackTitle.Text = view.Feedback.IsCorrect ? "答对了，注意力已复位" : "再听一下这个关键句";
+        FeedbackTitle.Text = view.Feedback.IsCorrect ? T("答对了，注意力已复位", "Correct — attention reset") : T("再听一下这个关键句", "Listen again to this key sentence");
         FeedbackTitle.Foreground = view.Feedback.IsCorrect
             ? (System.Windows.Media.Brush)FindResource("AccentBrush")
             : new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(164, 91, 44));
@@ -187,11 +207,11 @@ public partial class MainWindow : Window
             ? "—"
             : $"{(double)summary.CorrectAnswers / summary.Answers:P0}";
         SummaryText.Text =
-            $"弹出 {summary.QuestionsShown} 题 · 回答 {summary.Answers} 题 · 正确率 {accuracy}\n" +
-            $"排队 {summary.QuestionsQueued} 题 · 容量跳过 {summary.CapacityDrops} 题 · 题目有误 {summary.InvalidQuestions} 题";
+            T($"弹出 {summary.QuestionsShown} 题 · 回答 {summary.Answers} 题 · 正确率 {accuracy}\n", $"Shown {summary.QuestionsShown} · Answered {summary.Answers} · Accuracy {accuracy}\n") +
+            T($"排队 {summary.QuestionsQueued} 题 · 容量跳过 {summary.CapacityDrops} 题 · 题目有误 {summary.InvalidQuestions} 题", $"Queued {summary.QuestionsQueued} · Capacity skips {summary.CapacityDrops} · Reported issues {summary.InvalidQuestions}");
         StatusText.Text = summary.AttentionRating is null
-            ? "未填写注意力评分"
-            : $"注意力复位评分：{summary.AttentionRating}/5";
+            ? T("未填写注意力评分", "Attention rating skipped")
+            : T($"注意力复位评分：{summary.AttentionRating}/5", $"Attention reset rating: {summary.AttentionRating}/5");
     }
 
     private async void Choice_Click(object sender, RoutedEventArgs e)
@@ -273,10 +293,16 @@ public partial class MainWindow : Window
             return;
         }
 
-        var outcome = await _session.ApplyAsync(intent, _lifetime.Token);
-        if (!outcome.Accepted || !string.IsNullOrWhiteSpace(outcome.Message))
+        try
         {
-            StatusText.Text = outcome.Message;
+            var outcome = await _session.ApplyAsync(intent, _lifetime.Token);
+            if (!outcome.Accepted || !string.IsNullOrWhiteSpace(outcome.Message))
+            {
+                StatusText.Text = outcome.Message;
+            }
+        }
+        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
+        {
         }
     }
 
@@ -284,8 +310,8 @@ public partial class MainWindow : Window
     {
         var dialog = new SaveFileDialog
         {
-            Title = "导出 Focus Listener 分析记录",
-            Filter = "CSV 文件 (*.csv)|*.csv",
+            Title = T("导出 Focus Listener 分析记录", "Export Focus Listener analysis"),
+            Filter = T("CSV 文件 (*.csv)|*.csv", "CSV files (*.csv)|*.csv"),
             FileName = $"focus-listener-{DateTime.Now:yyyyMMdd-HHmm}.csv",
             AddExtension = true,
             DefaultExt = ".csv"
@@ -298,11 +324,12 @@ public partial class MainWindow : Window
         try
         {
             await FocusSessionFactory.ExportCsvAsync(_databasePath, dialog.FileName, _lifetime.Token);
-            StatusText.Text = $"已导出：{Path.GetFileName(dialog.FileName)}";
+            StatusText.Text = T($"已导出：{Path.GetFileName(dialog.FileName)}", $"Exported: {Path.GetFileName(dialog.FileName)}");
         }
         catch (Exception exception)
         {
-            StatusText.Text = $"导出失败：{exception.Message}";
+            ProductRuntime.Log("CsvExportFailed", exception);
+            StatusText.Text = T("导出失败，请选择其他可写目录后重试。", "Export failed. Choose another writable folder and try again.");
         }
     }
 
@@ -311,7 +338,7 @@ public partial class MainWindow : Window
         if (_view?.Deadline is { } deadline)
         {
             var remaining = Math.Max(0, Math.Ceiling((deadline - DateTimeOffset.UtcNow).TotalSeconds));
-            CountdownText.Text = $"{remaining:0} 秒";
+            CountdownText.Text = T($"{remaining:0} 秒", $"{remaining:0} sec");
         }
         else if (_view?.PendingExpiresAt is { } pending)
         {
@@ -328,11 +355,11 @@ public partial class MainWindow : Window
     {
         if (expiry is null)
         {
-            return "有 1 道待答题";
+            return T("有 1 道待答题", "1 pending question");
         }
 
         var seconds = Math.Max(0, (int)Math.Ceiling((expiry.Value - DateTimeOffset.UtcNow).TotalSeconds));
-        return $"待答题 · {seconds / 60}:{seconds % 60:00}";
+        return T($"待答题 · {seconds / 60}:{seconds % 60:00}", $"Pending · {seconds / 60}:{seconds % 60:00}");
     }
 
     private void ShowOnly(UIElement panel)
@@ -344,12 +371,43 @@ public partial class MainWindow : Window
         }
     }
 
+    private void UpdateModeLabel()
+    {
+        var live = !string.IsNullOrWhiteSpace(_apiKey);
+        ModeLabel.Text = live
+            ? T("真实课堂已就绪 · 点击更换 Gemini Key", "Real lesson ready · Change Gemini key")
+            : T("模拟课堂 · 点击配置 Gemini 免费层", "Simulation · Configure Gemini");
+        if (StartPanel.Children.OfType<Button>().FirstOrDefault() is { } startButton)
+        {
+            startButton.Content = live ? T("开始真实课堂", "Start real lesson") : T("开始模拟课堂", "Start simulation");
+        }
+    }
+
+    private static string T(string zh, string en) => ProductText.Choose(zh, en);
+
+    private static string? ReadConfiguredApiKey()
+    {
+        try
+        {
+            return WindowsCredentialStore.ReadApiKey() ?? Environment.GetEnvironmentVariable("GEMINI_API_KEY");
+        }
+        catch
+        {
+            return Environment.GetEnvironmentVariable("GEMINI_API_KEY");
+        }
+    }
+
     private IntPtr WindowProcedure(IntPtr hwnd, int message, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
         const int hotKeyMessage = 0x0312;
         if (message == hotKeyMessage && wParam.ToInt32() == ManualTriggerHotKeyId)
         {
             _ = TriggerManuallyAsync();
+            handled = true;
+        }
+
+        if (message == hotKeyMessage && HandleExperienceHotKeyV3(wParam.ToInt32()))
+        {
             handled = true;
         }
 
@@ -367,13 +425,31 @@ public partial class MainWindow : Window
     private void Minimize_Click(object sender, RoutedEventArgs e) => WindowState = WindowState.Minimized;
     private void Close_Click(object sender, RoutedEventArgs e) => Close();
 
+    internal void ShowFromTray()
+    {
+        Show();
+        WindowState = WindowState.Normal;
+        Activate();
+    }
+
+    internal async void EndSessionFromTray()
+    {
+        ShowFromTray();
+        if (_sessionTask is { IsCompleted: false })
+        {
+            await ApplyAsync(new EndSession(IntentId.New()));
+        }
+    }
+
     private void Window_Closing(object? sender, CancelEventArgs e)
     {
+        var handle = new WindowInteropHelper(this).Handle;
         _countdownTimer.Stop();
         _lifetime.Cancel();
+        CloseAudioExperienceV3(handle);
         if (_registeredHotKey)
         {
-            UnregisterHotKey(new WindowInteropHelper(this).Handle, ManualTriggerHotKeyId);
+            UnregisterHotKey(handle, ManualTriggerHotKeyId);
         }
         _windowSource?.RemoveHook(WindowProcedure);
         _lifetime.Dispose();

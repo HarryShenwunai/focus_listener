@@ -1,0 +1,66 @@
+name: Portable Beta release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+          cache: true
+          cache-dependency-path: "**/packages.lock.json"
+      - name: Restore repository tools
+        run: dotnet tool restore
+      - name: Verify tag and project version
+        shell: pwsh
+        run: |
+          $version = dotnet msbuild src/FocusListener.App/FocusListener.App.csproj -getProperty:Version
+          if ("v$version" -ne "${{ github.ref_name }}") { throw "Tag ${{ github.ref_name }} does not match v$version" }
+      - name: Restore locked dependencies
+        run: dotnet restore FocusListener.slnx --locked-mode -r win-x64
+      - name: Test Release
+        run: dotnet test FocusListener.slnx -c Release --no-restore
+      - name: Publish self-contained executable
+        run: >-
+          dotnet publish src/FocusListener.App/FocusListener.App.csproj
+          -c Release -r win-x64 --self-contained true --no-restore
+          -p:PublishSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:EnableCompressionInSingleFile=true
+          -p:PublishTrimmed=false
+          -o artifacts/app
+      - name: Build release archives and checksums
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $staging = "artifacts/FocusListener-$tag-win-x64"
+          New-Item -ItemType Directory -Path $staging | Out-Null
+          Copy-Item artifacts/app/FocusListener.App.exe "$staging/FocusListener.exe"
+          Copy-Item README.md,LICENSE,PRIVACY.md,THIRD_PARTY_NOTICES.md,CHANGELOG.md $staging/
+          dotnet tool run sbom-tool Generate -b $staging -bc . -pn FocusListener -pv $tag.TrimStart('v') -ps "Organization: Focus Listener contributors" -pm true
+          Compress-Archive -Path "$staging/*" -DestinationPath "artifacts/FocusListener-$tag-win-x64.zip"
+          if ((Get-Item "artifacts/FocusListener-$tag-win-x64.zip").Length -gt 90MB) { throw "Portable archive exceeds 90 MB" }
+          if (Test-Path artifacts/app/FocusListener.App.pdb) {
+            Compress-Archive artifacts/app/FocusListener.App.pdb "artifacts/FocusListener-$tag-symbols.zip"
+          }
+          Get-FileHash artifacts/*.zip -Algorithm SHA256 |
+            ForEach-Object { "$($_.Hash.ToLower())  $([IO.Path]::GetFileName($_.Path))" } |
+            Set-Content artifacts/SHA256SUMS.txt
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: "artifacts/FocusListener-*.zip"
+      - name: Create GitHub prerelease
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${{ github.ref_name }}" artifacts/*.zip artifacts/SHA256SUMS.txt --prerelease --generate-notes --title "Focus Listener ${{ github.ref_name }} Portable Beta"

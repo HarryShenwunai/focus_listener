@@ -49,7 +49,7 @@ internal sealed class ClassroomQuestionCandidateAdapter(
                     {
                         _status.Writer.TryWrite(new QuestionSourceStatus(
                             SessionHealth.Healthy,
-                            "继续监听，等待完整、可复述的课堂知识点。",
+                            T("继续监听，等待完整、可复述的课堂知识点。", "Listening continues while waiting for a complete, restatable knowledge point."),
                             $"CandidateRejected:{evaluation.RejectionReason}"));
                     }
                     continue;
@@ -106,11 +106,11 @@ internal sealed class ClassroomQuestionCandidateAdapter(
                             string.Empty,
                             string.Empty,
                             LiveTranscriptState.Paused,
-                            "实时转写已关闭",
+                            T("实时转写已关闭", "Realtime transcription is off"),
                             clock.UtcNow));
                         _status.Writer.TryWrite(new QuestionSourceStatus(
                             SessionHealth.Degraded,
-                            "实时转写已关闭，自动出题已暂停。",
+                            T("实时转写已关闭，自动出题已暂停。", "Realtime transcription is off; automatic questions are paused."),
                             "TranscriptionPaused"));
                     }
 
@@ -148,7 +148,7 @@ internal sealed class ClassroomQuestionCandidateAdapter(
                         string.Empty,
                         string.Empty,
                         LiveTranscriptState.Connecting,
-                        "音频设置已更新，正在重新连接…",
+                        T("音频设置已更新，正在重新连接…", "Audio settings updated. Reconnecting…"),
                         clock.UtcNow));
                 }
                 catch (Exception exception) when (
@@ -162,11 +162,11 @@ internal sealed class ClassroomQuestionCandidateAdapter(
                             string.Empty,
                             string.Empty,
                             LiveTranscriptState.Reconnecting,
-                            $"转写连接中断，正在进行第 {consecutiveFailures}/3 次重连…",
+                            T($"转写连接中断，正在进行第 {consecutiveFailures}/3 次重连…", $"Transcription disconnected. Reconnecting {consecutiveFailures}/3…"),
                             clock.UtcNow));
                         _status.Writer.TryWrite(new QuestionSourceStatus(
                             SessionHealth.Degraded,
-                            $"转写暂时中断，正在自动重连（{consecutiveFailures}/3）。",
+                            T($"转写暂时中断，正在自动重连（{consecutiveFailures}/3）。", $"Transcription is interrupted. Reconnecting automatically ({consecutiveFailures}/3)."),
                             "TranscriptionReconnecting"));
                         await clock.Delay(TimeSpan.FromSeconds(seconds), cancellation);
                         continue;
@@ -176,11 +176,11 @@ internal sealed class ClassroomQuestionCandidateAdapter(
                         string.Empty,
                         string.Empty,
                         LiveTranscriptState.Failed,
-                        "有声音但转写未返回；请点击“重试转写”",
+                        T("有声音但转写未返回；请点击“重试转写”", "Audio is present but no transcript returned. Choose Retry transcription."),
                         clock.UtcNow));
                     _status.Writer.TryWrite(new QuestionSourceStatus(
                         SessionHealth.Degraded,
-                        "有声音但转写未返回；请检查 Gemini、设备或点击重试。",
+                        T("有声音但转写未返回；请检查 Gemini、设备或点击重试。", "Audio is present but no transcript returned. Check Gemini and the selected device, or retry."),
                         "TranscriptionRetryRequired"));
                     consecutiveFailures = 0;
                     await WaitForRetryAsync(snapshot.ConfigurationChanged, cancellation);
@@ -211,6 +211,8 @@ internal sealed class ClassroomQuestionCandidateAdapter(
         {
         }
     }
+
+    private static string T(string zh, string en) => ProductText.Choose(zh, en);
 
     private async ValueTask<TranscriptUnit> DebounceAsync(
         TranscriptUnit latest,
@@ -266,12 +268,12 @@ internal sealed class ClassroomQuestionCandidateAdapter(
 
         _status.Writer.TryWrite(new QuestionSourceStatus(
             SessionHealth.Degraded,
-            "题目生成暂不可用，字幕与监听仍在继续。",
+            T("题目生成暂不可用，字幕与监听仍在继续。", "Question generation is unavailable; subtitles and listening continue."),
             "GenerationPaused60Seconds"));
         await clock.Delay(TimeSpan.FromSeconds(60), cancellation);
         _status.Writer.TryWrite(new QuestionSourceStatus(
             SessionHealth.Healthy,
-            "已恢复题目生成，继续监听。",
+            T("已恢复题目生成，继续监听。", "Question generation recovered. Listening continues."),
             "GenerationResumed"));
 
         try
@@ -280,7 +282,7 @@ internal sealed class ClassroomQuestionCandidateAdapter(
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            return KnowledgeQuestionEvaluation.Transient("网络、配额或模型暂不可用");
+            return KnowledgeQuestionEvaluation.Transient(T("网络、配额或模型暂不可用", "The network, quota, or model is temporarily unavailable"));
         }
     }
 }

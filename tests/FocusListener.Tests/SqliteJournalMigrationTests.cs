@@ -65,6 +65,10 @@ public sealed class SqliteJournalMigrationTests
             await using var count = connection.CreateCommand();
             count.CommandText = "SELECT COUNT(*) FROM session_events;";
             Assert.Equal(2L, Convert.ToInt64(await count.ExecuteScalarAsync()));
+            await using var version = connection.CreateCommand();
+            version.CommandText = "PRAGMA user_version;";
+            Assert.Equal(2L, Convert.ToInt64(await version.ExecuteScalarAsync()));
+            Assert.Single(Directory.GetFiles(directory, "legacy.db.backup-v0-*.db"));
             await connection.CloseAsync();
             await connection.DisposeAsync();
             SqliteConnection.ClearAllPools();
