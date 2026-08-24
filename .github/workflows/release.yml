@@ -56,7 +56,7 @@ jobs:
           Get-FileHash artifacts/*.zip -Algorithm SHA256 |
             ForEach-Object { "$($_.Hash.ToLower())  $([IO.Path]::GetFileName($_.Path))" } |
             Set-Content artifacts/SHA256SUMS.txt
-      - uses: actions/attest-build-provenance@v3
+      - uses: actions/attest-build-provenance@v4
         with:
           subject-path: "artifacts/FocusListener-*.zip"
       - name: Create GitHub prerelease
