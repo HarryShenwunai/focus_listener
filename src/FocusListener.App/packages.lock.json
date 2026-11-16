@@ -30,10 +30,10 @@
       },
       "Microsoft.Data.Sqlite.Core": {
         "type": "Transitive",
-        "resolved": "10.0.11",
-        "contentHash": "hubA20AGenQ4Sx0ElWaPpB8DISjXpdx463+1zOGRslsT0e/t/06ITv+pHsop8CcJ0d8PZLfgnT7juCDVD79Dkw==",
+        "resolved": "11.0.0",
+        "contentHash": "aWaF2LDjuFZwE9UsAGRYGNyS48xqaXoKPAjwpJI85fsaM/43s5NTRnl4xtqbTGKq8of2M/W8mo7DJk7v4zzHGQ==",
         "dependencies": {
-          "SQLitePCLRaw.core": "2.1.12"
+          "SQLitePCLRaw.core": "3.0.5"
         }
       },
       "Microsoft.Extensions.AI.Abstractions": {
@@ -46,61 +46,37 @@
         "resolved": "2.5.2",
         "contentHash": "vm4xrNt+i6OVRQ8vhfCcmDIUg3qvjyCTkSTNVTDFohsG6CXEpMaVFkidECL6yRYpHDnz4TqXhDoEQAcnHCu/tw=="
       },
-      "NAudio.Asio": {
-        "type": "Transitive",
-        "resolved": "3.0.0",
-        "contentHash": "JUdHfdJk7+xIuzBfcvE7gnAEBNbXDui0Ay7Zy4vt29UPP3319bkLYRoIR5W+bRFDn8aVdHnPMYDJANRAHx2AMg==",
-        "dependencies": {
-          "NAudio.Core": "3.0.0"
-        }
-      },
       "NAudio.Core": {
         "type": "Transitive",
-        "resolved": "3.0.0",
-        "contentHash": "uEX5xkjbUQ3w8XVuqcX1iMRr0avhOdn2WFiPL2X/kF72anSJSgdLhpkxCxr6N1hQr+hWx1L5lNJJeg0sh6xBiw==",
+        "resolved": "3.3.0",
+        "contentHash": "xU3f1/5jBTfdjauhcPbjo0O1Ow+PVTPnjMo0KbV7twkWRcoY3GnVmA3mbUXxAePtJ2eUbWgteHWfFjOAvGovLg==",
         "dependencies": {
           "System.Numerics.Tensors": "9.0.0"
         }
       },
-      "NAudio.Dmo": {
-        "type": "Transitive",
-        "resolved": "3.0.0",
-        "contentHash": "4HfNHTcxe/2wIqFsgfUAHUQk3Gm7jIUap47nwP3Ro1dFh2QRWhroxDV3O4+oeHpqOuK5eFszbrxjo5yayS8W5w==",
-        "dependencies": {
-          "NAudio.Core": "3.0.0"
-        }
-      },
       "NAudio.Midi": {
         "type": "Transitive",
-        "resolved": "3.0.0",
-        "contentHash": "h3VjMTBoBAOw63W7mMrv1kHdRQZkuayTpYrUsusUolORkmgfFiMg8eM4VHwgMBcOgm14997B/r7EojavMBu6CQ==",
+        "resolved": "3.3.0",
+        "contentHash": "ha7yD5Pf2YjBlk31T2ItNl/7rDHhksRjk3KVzxbT4NibVSO7C9IygO02U/pgbrE5CU3M48IvZArLYh7UPxR6QQ==",
         "dependencies": {
-          "NAudio.Core": "3.0.0"
+          "NAudio.Core": "3.3.0"
         }
       },
       "NAudio.Wasapi": {
         "type": "Transitive",
-        "resolved": "3.0.0",
-        "contentHash": "bYkBTvc9U0gCfi1p0hyNnoYeE2w2qH7U58zb9LecMhboTarw4xOKLnEfHV9XaSrnFS28SC1iG2z/lJuBMRpK/A==",
+        "resolved": "3.3.0",
+        "contentHash": "wUFqmyrTHde79yzt68g/akvtVG9KDnOVFJ0Aawr07zlbwcGOQo/IWO/NTw9YJTuESl9WGgncZitx/Q7JWQaaBA==",
         "dependencies": {
-          "NAudio.Core": "3.0.0"
-        }
-      },
-      "NAudio.WinForms": {
-        "type": "Transitive",
-        "resolved": "3.0.0",
-        "contentHash": "JhDTk3vW2LZY0qE7eF779rmMp2sWcsAoQCo712MorNRroRfafG6xtU/BBDSaThE31XIaQxfTB7FA3lWwd+AyDQ==",
-        "dependencies": {
-          "NAudio.WinMM": "3.0.0"
+          "NAudio.Core": "3.3.0"
         }
       },
       "NAudio.WinMM": {
         "type": "Transitive",
-        "resolved": "3.0.0",
-        "contentHash": "RfBlBk0KPNQx3OUcZtxbqhaz0sKMVTcntBtIHZYfePMA7CjawePHR4xpH+lKoVnWxppPxoAk0Bf8k1fE30RuAQ==",
+        "resolved": "3.3.0",
+        "contentHash": "8E5LCxXDftvBe3/O8fal8HbJt1LB3odYDGvWrRoyK7qTp2i0ELrOcr3ydDR0JIqhdi7AMXPosJFR1gssT5kcuw==",
         "dependencies": {
-          "NAudio.Core": "3.0.0",
-          "NAudio.Midi": "3.0.0"
+          "NAudio.Core": "3.3.0",
+          "NAudio.Midi": "3.3.0"
         }
       },
       "Newtonsoft.Json": {
@@ -108,31 +84,39 @@
         "resolved": "13.0.3",
         "contentHash": "HrC5BXdl00IP9zeV+0Z848QWPAoCr9P3bDEZguI+gkLcBKAOxix/tLEAAHC+UvDNPv4a2d18lOReHMOagPa+zQ=="
       },
+      "SQLite": {
+        "type": "Transitive",
+        "resolved": "3.53.4",
+        "contentHash": "KN7jeWqgUPeBRe1FlcpZURzxomuKKEKHmBBQfg+Nx7NkY1LjKhzHvH+3ASkNvhayESE34nMBinL9CV21JfPRJw=="
+      },
       "SQLitePCLRaw.bundle_e_sqlite3": {
         "type": "Transitive",
-        "resolved": "2.1.12",
-        "contentHash": "mAgscpQMLw5/nfA1Q5oJVAT29yROUo1ifZGbbTpx/lwZpSxMUGoYbKfmvdm8oXER+RzxqBmmQzeBEVKfeHv2nw==",
+        "resolved": "3.0.5",
+        "contentHash": "SW8iASIyWMrLzqabUHYQRvALhvD4ylSBsj4PgEVGwc36kQjc9xT5kSV/XQ9rU7nIpBWD+LPyX3Hlw5FzyUzGeQ==",
         "dependencies": {
-          "SQLitePCLRaw.lib.e_sqlite3": "2.1.12",
-          "SQLitePCLRaw.provider.e_sqlite3": "2.1.12"
+          "SQLite": "3.53.4",
+          "SQLitePCLRaw.config.e_sqlite3": "3.0.5"
+        }
+      },
+      "SQLitePCLRaw.config.e_sqlite3": {
+        "type": "Transitive",
+        "resolved": "3.0.5",
+        "contentHash": "aSk8WE5tF2MybESMgtZAEyMVCAWA0nBqOMc48HFoa9UoSdtm3goDXVzNRnefeKIwE6bV9NaNXptn1F9ReMQI0Q==",
+        "dependencies": {
+          "SQLitePCLRaw.provider.e_sqlite3": "3.0.5"
         }
       },
       "SQLitePCLRaw.core": {
         "type": "Transitive",
-        "resolved": "2.1.12",
-        "contentHash": "ETpNw9DY3ckWLgRRAeCHj+GKOuPi61aeczkXhgHexUvqoZBAYg8RYESE2J7O1M7+o6QbdSEZwrw9bfqztUVWXg=="
-      },
-      "SQLitePCLRaw.lib.e_sqlite3": {
-        "type": "Transitive",
-        "resolved": "2.1.12",
-        "contentHash": "fWi8Dbknuhgg72fWinIdjXVaqO1hHL4YBBwVLnr7e1c9TAZwJ0QE38j9syW1hwx6HaqEVTwI+O07WPdZn8Rp0w=="
+        "resolved": "3.0.5",
+        "contentHash": "k81AYXXRCw3Zj8rOhyBoCsx/U97KYDFI2CSKr/ijl5BwpsW/hX/4kBiDmerFaoust8nxBwa0IHQFw8MmSHRtnQ=="
       },
       "SQLitePCLRaw.provider.e_sqlite3": {
         "type": "Transitive",
-        "resolved": "2.1.12",
-        "contentHash": "W3oH4XIfCzFrgUSDKHhN6N+dgzA5YHOR2VxX8GB6Qy7CyrJJgxPEG8NirgYWlPQC5P2jz2knSsexWu4tDUL33g==",
+        "resolved": "3.0.5",
+        "contentHash": "um8YSWduhhuskTG2bHfZrBqMNQOydfU8pcseT+cu5RivOGyoUbCrGXxgoRNTmRYw2VbMWnEZVVFcneZT/5dsBg==",
         "dependencies": {
-          "SQLitePCLRaw.core": "2.1.12"
+          "SQLitePCLRaw.core": "3.0.5"
         }
       },
       "System.Management": {
@@ -148,16 +132,16 @@
       "focuslistener": {
         "type": "Project",
         "dependencies": {
-          "Google.GenAI": "[1.17.0, )",
-          "Microsoft.Data.Sqlite": "[10.0.11, )",
-          "NAudio": "[3.0.0, )"
+          "Google.GenAI": "[2.1.0, )",
+          "Microsoft.Data.Sqlite": "[11.0.0, )",
+          "NAudio": "[3.3.0, )"
         }
       },
       "Google.GenAI": {
         "type": "CentralTransitive",
-        "requested": "[1.17.0, )",
-        "resolved": "1.17.0",
-        "contentHash": "DU7eoRe5zAXVKNTPYXyC6pyhHdyQlcExawv/iGD/lSU3h8BfVNKcFxlST7Ca8bkykdQNKDtDn/BJfF/mJsu3qA==",
+        "requested": "[2.1.0, )",
+        "resolved": "2.1.0",
+        "contentHash": "eqrnpcFOh02/m22Q6QQS3hjTMkIKipD5kbihacLZrKXUjlv3LFRpczsjoH8H3WKdQNUrYprvDpYupuWGuns/Ww==",
         "dependencies": {
           "Google.Apis.Auth": "1.69.0",
           "Microsoft.Extensions.AI.Abstractions": "10.6.0",
@@ -166,36 +150,33 @@
       },
       "Microsoft.Data.Sqlite": {
         "type": "CentralTransitive",
-        "requested": "[10.0.11, )",
-        "resolved": "10.0.11",
-        "contentHash": "7je7UELzm131GiLYc4PpZvfKXIgIyzPM+v+tjcd/nbnuWRfgcONYKzDTqJlURxwVCFsVnlpmq6y6yn4qvR8QXQ==",
+        "requested": "[11.0.0, )",
+        "resolved": "11.0.0",
+        "contentHash": "K3hceHG5pxWJ+mytesLiGxmJ988YFrKnMGml0xbq//UWsM79KD8nQ5sBwTSLKgWecT6Saict/jIB8O6lDL0M2g==",
         "dependencies": {
-          "Microsoft.Data.Sqlite.Core": "10.0.11",
-          "SQLitePCLRaw.bundle_e_sqlite3": "2.1.12",
-          "SQLitePCLRaw.core": "2.1.12"
+          "Microsoft.Data.Sqlite.Core": "[11.0.0, 12.0.0-a)",
+          "SQLitePCLRaw.bundle_e_sqlite3": "3.0.5",
+          "SQLitePCLRaw.core": "3.0.5"
         }
       },
       "NAudio": {
         "type": "CentralTransitive",
-        "requested": "[3.0.0, )",
-        "resolved": "3.0.0",
-        "contentHash": "ZPB4QJyVpMXOBpzwASEjiqVKbtTM+81eex7VMNOP31P0f3kqNhJL3v/C7DooVcta5PkSxtx4NH8l/UGUKawW1g==",
+        "requested": "[3.3.0, )",
+        "resolved": "3.3.0",
+        "contentHash": "XSOr9vFTjY+ZxjtpD8/2MkLQLwiyd6TgdLw4GIlrBX55Gn+lDFiIkKms+d3BUftYN6sj/mrpq9HxqEYTK/ofuw==",
         "dependencies": {
-          "NAudio.Asio": "3.0.0",
-          "NAudio.Core": "3.0.0",
-          "NAudio.Dmo": "3.0.0",
-          "NAudio.Midi": "3.0.0",
-          "NAudio.Wasapi": "3.0.0",
-          "NAudio.WinForms": "3.0.0",
-          "NAudio.WinMM": "3.0.0"
+          "NAudio.Core": "3.3.0",
+          "NAudio.Midi": "3.3.0",
+          "NAudio.Wasapi": "3.3.0",
+          "NAudio.WinMM": "3.3.0"
         }
       }
     },
     "net10.0-windows10.0.19041/win-x64": {
-      "SQLitePCLRaw.lib.e_sqlite3": {
+      "SQLite": {
         "type": "Transitive",
-        "resolved": "2.1.12",
-        "contentHash": "fWi8Dbknuhgg72fWinIdjXVaqO1hHL4YBBwVLnr7e1c9TAZwJ0QE38j9syW1hwx6HaqEVTwI+O07WPdZn8Rp0w=="
+        "resolved": "3.53.4",
+        "contentHash": "KN7jeWqgUPeBRe1FlcpZURzxomuKKEKHmBBQfg+Nx7NkY1LjKhzHvH+3ASkNvhayESE34nMBinL9CV21JfPRJw=="
       },
       "System.Management": {
         "type": "Transitive",
